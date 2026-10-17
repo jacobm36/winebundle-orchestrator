@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${FAKE_WINESERVER_LOG:-}" ]]; then
+  printf '%s\n' "$*" >>"$FAKE_WINESERVER_LOG"
+fi
+exit 0

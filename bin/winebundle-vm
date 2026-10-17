@@ -1,0 +1,281 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/common.sh
+source "$PROJECT_ROOT/lib/common.sh"
+# shellcheck source=lib/backends/multipass.sh
+source "$PROJECT_ROOT/lib/backends/multipass.sh"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  winebundle-vm run [options]
+  winebundle-vm config create FILE [options]
+  winebundle-vm config validate FILE
+
+Required:
+  --installer PATH           Trusted EXE or MSI installer
+  --entrypoint WINDOWS_PATH  Installed executable in the Wine prefix
+  --output DIR               Host directory for artifacts and diagnostics
+
+Validation:
+  --smoke-script PATH        Trusted Bash smoke test
+  --smoke-arg VALUE          Entrypoint argument; repeat as needed
+  --smoke-window TITLE       Pass when a window whose title contains TITLE appears
+  --smoke-exit-code CODE     Expected exit code (default: 0)
+
+Installer:
+  --install-arg VALUE        Installer argument; repeat as needed
+  --winetricks VERB          winetricks verb to install first; repeat as needed
+  --pre-install-script PATH  Trusted Bash script run against the prefix before the installer
+  --keep-host-drive          Keep the z: host drive mapping in the bundle
+  --arch win32|win64         Wine prefix architecture (default: win64)
+  --timeout SECONDS          Per-process timeout (default: 180)
+
+VM:
+  --image IMAGE              Multipass image (default: 24.04)
+  --cpus COUNT               Virtual CPUs (default: 2)
+  --memory SIZE              Memory (default: 4G)
+  --disk SIZE                Disk (default: 20G)
+  --skip-provision           Use when the image already has Wine and Xvfb
+  --keep-vm                  Keep the VM for debugging
+
+Environment:
+  MULTIPASS_COMMAND          Multipass executable (default: multipass)
+  PYTHON_COMMAND             Python 3 executable (default: python3)
+
+Configuration:
+  --config FILE              Load a version 1 JSON build configuration
+
+For config create, FILE is written without running a build. It accepts the
+same build options as run, except --config. Explicit run options override
+scalar configuration values and append repeatable arguments.
+EOF
+}
+
+run_with_config() {
+  local config='' config_arguments_file=''
+  local python_command=${PYTHON_COMMAND:-python3}
+  local -a command_arguments=() config_arguments=()
+
+  while (($#)); do
+    case "$1" in
+      --config)
+        require_value "$1" "${2:-}"
+        [[ -z "$config" ]] || die "--config may only be specified once"
+        config=$2
+        shift 2
+        ;;
+      *)
+        command_arguments+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -n "$config" ]]; then
+    [[ -f "$config" ]] || die "configuration does not exist: $config"
+    require_command "$python_command"
+    config_arguments_file="$(mktemp)"
+    if ! "$python_command" "$PROJECT_ROOT/lib/winebundle_config.py" arguments "$config" \
+      >"$config_arguments_file"; then
+      rm -f "$config_arguments_file"
+      exit 2
+    fi
+    mapfile -d '' -t config_arguments <"$config_arguments_file"
+    rm -f "$config_arguments_file"
+  fi
+
+  run_job "${config_arguments[@]}" "${command_arguments[@]}"
+}
+
+config_command() {
+  local python_command=${PYTHON_COMMAND:-python3}
+  require_command "$python_command"
+  case "${1:-}" in
+    create)
+      shift
+      "$python_command" "$PROJECT_ROOT/lib/winebundle_config.py" create "$@"
+      ;;
+    validate)
+      shift
+      "$python_command" "$PROJECT_ROOT/lib/winebundle_config.py" validate "$@"
+      ;;
+    --help|-h|help|'')
+      usage
+      ;;
+    *)
+      die "unknown config command: $1"
+      ;;
+  esac
+}
+
+run_job() {
+  local installer='' entrypoint='' output='' smoke_script='' pre_install_script=''
+  local smoke_window='' smoke_exit_set=0 keep_host_drive=0
+  local arch='win64' timeout_seconds=180 smoke_exit=0
+  local image='24.04' cpus=2 memory='4G' disk='20G'
+  local provision=1 keep_vm=0
+  local -a install_args=() smoke_args=() winetricks_verbs=()
+
+  while (($#)); do
+    case "$1" in
+      --installer) require_value "$1" "${2:-}"; installer=$2; shift 2 ;;
+      --entrypoint) require_value "$1" "${2:-}"; entrypoint=$2; shift 2 ;;
+      --output) require_value "$1" "${2:-}"; output=$2; shift 2 ;;
+      --smoke-script) require_value "$1" "${2:-}"; smoke_script=$2; shift 2 ;;
+      --smoke-arg) require_value "$1" "${2:-}"; smoke_args+=("$2"); shift 2 ;;
+      --smoke-window) require_value "$1" "${2:-}"; smoke_window=$2; shift 2 ;;
+      --smoke-exit-code) require_value "$1" "${2:-}"; smoke_exit=$2; smoke_exit_set=1; shift 2 ;;
+      --install-arg) require_value "$1" "${2:-}"; install_args+=("$2"); shift 2 ;;
+      --winetricks) require_value "$1" "${2:-}"; winetricks_verbs+=("$2"); shift 2 ;;
+      --pre-install-script) require_value "$1" "${2:-}"; pre_install_script=$2; shift 2 ;;
+      --keep-host-drive) keep_host_drive=1; shift ;;
+      --arch) require_value "$1" "${2:-}"; arch=$2; shift 2 ;;
+      --timeout) require_value "$1" "${2:-}"; timeout_seconds=$2; shift 2 ;;
+      --image) require_value "$1" "${2:-}"; image=$2; shift 2 ;;
+      --cpus) require_value "$1" "${2:-}"; cpus=$2; shift 2 ;;
+      --memory) require_value "$1" "${2:-}"; memory=$2; shift 2 ;;
+      --disk) require_value "$1" "${2:-}"; disk=$2; shift 2 ;;
+      --skip-provision) provision=0; shift ;;
+      --keep-vm) keep_vm=1; shift ;;
+      --help) usage; return 0 ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+
+  [[ -f "$installer" ]] || die "installer does not exist: $installer"
+  [[ "$installer" =~ \.(exe|EXE|msi|MSI)$ ]] || die "installer must be an EXE or MSI"
+  [[ -n "$entrypoint" ]] || die "--entrypoint is required"
+  [[ -n "$output" ]] || die "--output is required"
+  [[ -z "$smoke_script" || -f "$smoke_script" ]] ||
+    die "smoke script does not exist: $smoke_script"
+  [[ -z "$smoke_script" || ${#smoke_args[@]} -eq 0 ]] ||
+    die "--smoke-script cannot be combined with --smoke-arg"
+  [[ -z "$smoke_script" || -z "$smoke_window" ]] ||
+    die "--smoke-script cannot be combined with --smoke-window"
+  [[ -z "$smoke_window" ]] || (( ! smoke_exit_set )) ||
+    die "--smoke-exit-code does not apply to --smoke-window"
+  [[ -z "$pre_install_script" || -f "$pre_install_script" ]] ||
+    die "pre-install script does not exist: $pre_install_script"
+  local verb
+  for verb in "${winetricks_verbs[@]}"; do
+    [[ "$verb" =~ ^[A-Za-z0-9][A-Za-z0-9_.=-]*$ ]] || die "invalid winetricks verb: $verb"
+  done
+  [[ "$arch" == win32 || "$arch" == win64 ]] || die "invalid architecture: $arch"
+  [[ "$timeout_seconds" =~ ^[1-9][0-9]*$ ]] || die "timeout must be positive"
+  [[ "$smoke_exit" =~ ^[0-9]+$ ]] || die "smoke exit code must be non-negative"
+  [[ "$cpus" =~ ^[1-9][0-9]*$ ]] || die "CPU count must be positive"
+
+  require_command tar
+  multipass_require
+
+  installer="$(absolute_file "$installer")"
+  if [[ -n "$smoke_script" ]]; then
+    smoke_script="$(absolute_file "$smoke_script")"
+  fi
+  if [[ -n "$pre_install_script" ]]; then
+    pre_install_script="$(absolute_file "$pre_install_script")"
+  fi
+  mkdir -p "$output"
+  output="$(absolute_directory "$output")"
+
+  local job_id vm_name temp_dir payload_archive result_archive result_dir
+  local remote_root='/home/ubuntu/job' remote_installer remote_smoke='' remote_pre_install=''
+  job_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  vm_name="winebundle-${job_id,,}"
+  temp_dir="$(mktemp -d)"
+  payload_archive="$temp_dir/worker.tar.gz"
+  result_archive="$temp_dir/result.tar.gz"
+  result_dir="$output/$job_id"
+  remote_installer="$remote_root/installer.${installer##*.}"
+
+  WB_CLEANUP_TEMP_DIR=$temp_dir
+  WB_CLEANUP_VM_NAME=$vm_name
+  WB_CLEANUP_VM_CREATED=0
+  WB_CLEANUP_KEEP_VM=$keep_vm
+  cleanup() {
+    local cleanup_status=0
+    rm -rf "$WB_CLEANUP_TEMP_DIR"
+    if (( WB_CLEANUP_VM_CREATED )) && (( ! WB_CLEANUP_KEEP_VM )); then
+      log "Deleting VM $WB_CLEANUP_VM_NAME"
+      if ! multipass_delete "$WB_CLEANUP_VM_NAME"; then
+        printf 'winebundle-vm: failed to delete VM %s\n' "$WB_CLEANUP_VM_NAME" >&2
+        cleanup_status=1
+      fi
+    elif (( WB_CLEANUP_VM_CREATED )); then
+      log "Keeping VM $WB_CLEANUP_VM_NAME"
+    fi
+    return "$cleanup_status"
+  }
+  trap cleanup EXIT
+
+  tar -C "$PROJECT_ROOT" -czf "$payload_archive" worker guest/run-job.sh
+
+  log "Launching disposable VM $vm_name"
+  multipass_launch "$image" "$vm_name" "$cpus" "$memory" "$disk"
+  WB_CLEANUP_VM_CREATED=1
+  multipass_exec "$vm_name" mkdir -p "$remote_root"
+  multipass_transfer_in "$payload_archive" "$vm_name" "$remote_root/worker.tar.gz"
+  multipass_transfer_in "$installer" "$vm_name" "$remote_installer"
+  if [[ -n "$smoke_script" ]]; then
+    remote_smoke="$remote_root/smoke-test.sh"
+    multipass_transfer_in "$smoke_script" "$vm_name" "$remote_smoke"
+  fi
+  if [[ -n "$pre_install_script" ]]; then
+    remote_pre_install="$remote_root/pre-install-input.sh"
+    multipass_transfer_in "$pre_install_script" "$vm_name" "$remote_pre_install"
+  fi
+
+  local -a guest_command=(
+    bash "$remote_root/guest/run-job.sh"
+    --job-root "$remote_root"
+    --installer "$remote_installer"
+    --entrypoint "$entrypoint"
+    --arch "$arch"
+    --timeout "$timeout_seconds"
+    --smoke-exit-code "$smoke_exit"
+  )
+  (( provision )) || guest_command+=(--skip-provision)
+  [[ -z "$remote_smoke" ]] || guest_command+=(--smoke-script "$remote_smoke")
+  [[ -z "$remote_pre_install" ]] || guest_command+=(--pre-install-script "$remote_pre_install")
+  [[ -z "$smoke_window" ]] || guest_command+=(--smoke-window "$smoke_window")
+  (( ! keep_host_drive )) || guest_command+=(--keep-host-drive)
+  local value
+  for value in "${install_args[@]}"; do guest_command+=(--install-arg "$value"); done
+  for value in "${smoke_args[@]}"; do guest_command+=(--smoke-arg "$value"); done
+  for value in "${winetricks_verbs[@]}"; do guest_command+=(--winetricks "$value"); done
+
+  local job_status
+  if multipass_exec "$vm_name" "${guest_command[@]}"; then
+    job_status=0
+  else
+    job_status=$?
+  fi
+
+  if multipass_transfer_out "$vm_name" "$remote_root/result.tar.gz" "$result_archive"; then
+    safe_extract_tar "$result_archive" "$result_dir"
+    log "Results saved to $result_dir"
+  elif (( job_status == 0 )); then
+    die "job succeeded but its result archive could not be retrieved"
+  else
+    printf 'winebundle-vm: job failed and diagnostics could not be retrieved\n' >&2
+  fi
+
+  (( job_status == 0 )) || die "guest job failed with exit code $job_status"
+  [[ -d "$result_dir/artifacts" ]] ||
+    die "guest job did not produce an artifacts directory"
+  log "Job completed successfully"
+}
+
+main() {
+  case "${1:-}" in
+    run) shift; run_with_config "$@" ;;
+    config) shift; config_command "$@" ;;
+    --help|-h|help|'') usage ;;
+    *) die "unknown command: $1" ;;
+  esac
+}
+
+main "$@"

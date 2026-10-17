@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${WINEPREFIX:?}"
+: "${WINE:?}"
+printf '%s\n' "$*" >"$WINEPREFIX/drive_c/winetricks-args"

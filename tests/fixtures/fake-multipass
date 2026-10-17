@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${FAKE_MULTIPASS_STATE:?FAKE_MULTIPASS_STATE is required}"
+printf '%q ' "$@" >>"$FAKE_MULTIPASS_STATE/commands.log"
+printf '\n' >>"$FAKE_MULTIPASS_STATE/commands.log"
+
+command_name=${1:-}
+shift || true
+
+case "$command_name" in
+  launch)
+    while (($#)); do
+      if [[ "$1" == '--name' ]]; then
+        printf '%s\n' "$2" >"$FAKE_MULTIPASS_STATE/vm-name"
+        break
+      fi
+      shift
+    done
+    ;;
+  exec)
+    if [[ "$*" == *guest/run-job.sh* ]] && [[ "${FAKE_MULTIPASS_JOB_STATUS:-0}" -ne 0 ]]; then
+      exit "$FAKE_MULTIPASS_JOB_STATUS"
+    fi
+    ;;
+  transfer)
+    source_path=$1
+    destination=$2
+    if [[ "$source_path" == *:* ]]; then
+      stage="$(mktemp -d)"
+      trap 'rm -rf "$stage"' EXIT
+      mkdir -p "$stage/artifacts/example-job" "$stage/work"
+      printf '{"state":"succeeded"}\n' >"$stage/artifacts/example-job/status.json"
+      if [[ "${FAKE_MULTIPASS_JOB_STATUS:-0}" -ne 0 ]]; then
+        printf 'simulated guest failure\n' >"$stage/work/failure.log"
+      fi
+      case "${FAKE_MULTIPASS_MALICIOUS:-}" in
+        traversal)
+          : >"$stage/evil"
+          tar -C "$stage" -czf "$destination" -P \
+            --transform 's,^evil$,../escaped.txt,' artifacts work evil
+          ;;
+        symlink)
+          mkdir -p "$stage/real"
+          : >"$stage/real/pwn.txt"
+          ln -s "$FAKE_MULTIPASS_STATE/outside" "$stage/link"
+          tar -C "$stage" -czf "$destination" \
+            --transform 's,^real,link,' artifacts work link real
+          ;;
+        *)
+          tar -C "$stage" -czf "$destination" artifacts work
+          ;;
+      esac
+    fi
+    ;;
+  delete)
+    printf 'deleted\n' >"$FAKE_MULTIPASS_STATE/deleted"
+    ;;
+  *)
+    printf 'fake-multipass: unsupported command: %s\n' "$command_name" >&2
+    exit 2
+    ;;
+esac

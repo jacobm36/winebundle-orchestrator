@@ -1,0 +1,7 @@
+artifacts/
+*.exe
+*.msi
+*.tar.gz
+.tmp/
+__pycache__/
+*.pyc

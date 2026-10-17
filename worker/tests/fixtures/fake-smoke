@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${WINEPREFIX:?}"
+: "${WINE_COMMAND:?}"
+: "${ENTRYPOINT:?}"
+: "${SMOKE_WORK_DIR:?}"
+[[ "$ENTRYPOINT" == 'C:\Program Files\Test App\app.exe' ]]
+[[ -f "$WINEPREFIX/drive_c/Program Files/Test App/app.exe" ]]

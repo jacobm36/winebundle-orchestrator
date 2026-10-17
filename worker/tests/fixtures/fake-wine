@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == '--version' ]]; then
+  printf 'wine-fake-1.0\n'
+  exit 0
+fi
+
+if [[ -n "${FAKE_WINE_RECORD:-}" ]]; then
+  printf 'WINEPREFIX=%s WINEARCH=%s ARGS=%s\n' \
+    "${WINEPREFIX:-}" "${WINEARCH:-}" "$*" >>"$FAKE_WINE_RECORD"
+fi
+
+if [[ -n "${FAKE_WINE_HANG:-}" && "${1:-}" == *installer.exe ]]; then
+  sleep 30
+fi
+
+if [[ -n "${FAKE_WINDOW_TITLE:-}" && "${1:-}" == *app.exe ]]; then
+  : >"$WINEPREFIX/window-open"
+  sleep 30
+fi
+
+if [[ "${1:-}" == *.exe || "${1:-}" == *.EXE || "${1:-}" == 'msiexec' ]]; then
+  if [[ "${1:-}" == 'msiexec' ]]; then
+    mkdir -p "$WINEPREFIX/drive_c/Program Files/Test App"
+    : >"$WINEPREFIX/drive_c/Program Files/Test App/app.exe"
+  elif [[ "${1:-}" == *installer.exe || "${1:-}" == *installer.EXE ]]; then
+    mkdir -p "$WINEPREFIX/drive_c/Program Files/Test App"
+    : >"$WINEPREFIX/drive_c/Program Files/Test App/app.exe"
+  fi
+fi
+
+if [[ "${1:-}" == *app.exe ]]; then
+  exit "${FAKE_SMOKE_EXIT:-0}"
+fi

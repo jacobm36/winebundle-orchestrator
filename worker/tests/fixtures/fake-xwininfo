@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '\nxwininfo: Window id: 0x1a1 (the root window) (has no name)\n'
+if [[ -f "${WINEPREFIX:-/nonexistent}/window-open" ]]; then
+  printf '     0x400001 "%s": ("app.exe" "App")  200x100+0+0  +0+0\n' "${FAKE_WINDOW_TITLE:-}"
+fi

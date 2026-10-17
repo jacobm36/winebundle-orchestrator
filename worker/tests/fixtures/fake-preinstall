@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${WINEPREFIX:?}"
+: "${WINE_COMMAND:?}"
+: "${WINEBOOT_COMMAND:?}"
+: "${WINESERVER_COMMAND:?}"
+: "${INSTALLER:?}"
+[[ -f "$INSTALLER" ]]
+: >"$WINEPREFIX/drive_c/pre-install-ran"

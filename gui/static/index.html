@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Winebundle Orchestrator</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">Local build console</p>
+      <h1>Winebundle Orchestrator</h1>
+      <p>Create, validate, import, and run reproducible Wine bundle configurations.</p>
+    </div>
+    <div class="actions">
+      <label class="button secondary" for="import-config">Import config</label>
+      <input id="import-config" type="file" accept="application/json,.json">
+      <button id="export-config" class="secondary" type="button">Export config</button>
+    </div>
+  </header>
+
+  <main>
+    <form id="build-form">
+      <section>
+        <h2>Bundle inputs</h2>
+        <div class="grid">
+          <label>Installer path
+            <input name="installer" required placeholder="/home/me/setup.exe">
+          </label>
+          <label>Output directory
+            <input name="output" required placeholder="/home/me/artifacts">
+          </label>
+          <label class="wide">Windows entrypoint
+            <input name="entrypoint" required placeholder="C:\Program Files\Vendor\Application.exe">
+          </label>
+          <label>Architecture
+            <select name="arch">
+              <option value="win64">64-bit (win64)</option>
+              <option value="win32">32-bit (win32)</option>
+            </select>
+          </label>
+          <label>Process timeout (seconds)
+            <input name="timeout" type="number" min="1" value="180">
+          </label>
+          <label class="wide">Installer arguments <span>one per line</span>
+            <textarea name="installArgs" rows="3" placeholder="/S"></textarea>
+          </label>
+          <label class="wide">Winetricks verbs <span>one per line</span>
+            <textarea name="winetricks" rows="3" placeholder="corefonts&#10;vcrun2019"></textarea>
+          </label>
+          <label class="wide">Pre-install script path
+            <input name="preInstallScript" placeholder="/home/me/prepare-prefix.sh">
+          </label>
+          <label class="check wide">
+            <input name="keepHostDrive" type="checkbox">
+            Keep Wine host-drive mappings (reduces portability)
+          </label>
+        </div>
+      </section>
+
+      <section>
+        <h2>Validation</h2>
+        <div class="validation-tabs">
+          <label><input type="radio" name="validationType" value="command" checked> Command</label>
+          <label><input type="radio" name="validationType" value="window"> Window</label>
+          <label><input type="radio" name="validationType" value="script"> Script</label>
+        </div>
+        <div id="validation-command" class="grid validation-panel">
+          <label class="wide">Smoke-test arguments <span>one per line</span>
+            <textarea name="smokeArgs" rows="3" placeholder="--version"></textarea>
+          </label>
+          <label>Expected exit code
+            <input name="smokeExitCode" type="number" min="0" value="0">
+          </label>
+        </div>
+        <div id="validation-window" class="grid validation-panel hidden">
+          <label class="wide">Expected window-title text
+            <input name="smokeWindow" placeholder="Application Name">
+          </label>
+        </div>
+        <div id="validation-script" class="grid validation-panel hidden">
+          <label class="wide">Smoke-test script path
+            <input name="smokeScript" placeholder="/home/me/application-smoke.sh">
+          </label>
+        </div>
+      </section>
+
+      <details>
+        <summary>Virtual machine settings</summary>
+        <section class="grid">
+          <label>Multipass image
+            <input name="image" value="24.04">
+          </label>
+          <label>Virtual CPUs
+            <input name="cpus" type="number" min="1" value="2">
+          </label>
+          <label>Memory
+            <input name="memory" value="4G">
+          </label>
+          <label>Disk
+            <input name="disk" value="20G">
+          </label>
+          <label class="check">
+            <input name="skipProvision" type="checkbox">
+            Use a prepared image
+          </label>
+          <label class="check">
+            <input name="keepVm" type="checkbox">
+            Keep VM for debugging
+          </label>
+        </section>
+      </details>
+
+      <div id="message" role="alert"></div>
+      <button id="start-build" class="primary" type="submit">Validate and build</button>
+    </form>
+
+    <aside>
+      <div class="log-heading">
+        <div>
+          <p class="eyebrow">Build output</p>
+          <h2 id="job-status">Not started</h2>
+        </div>
+        <span id="status-dot"></span>
+      </div>
+      <pre id="build-log">Build logs will appear here.</pre>
+    </aside>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
