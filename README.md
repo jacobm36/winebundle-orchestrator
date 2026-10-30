@@ -172,6 +172,105 @@ settings from `batocera.conf` (runner, DXVK/VKD3D, sync options), and DLL
 overrides from `user.reg`. Load the resulting file with the GUI's import button
 or `bin/winebundle-vm run --config ./game.json`.
 
+## Game library and guided local setup
+
+For a worked desktop installation example, see the
+[local setup tutorial](LOCAL-SETUP-TUTORIAL.md).
+
+Start the GUI below to open **Your games**. The library is the default home
+screen; `/local` remains an alias. The VM builder is available through
+**Advanced: VM bundle builder** at `/builder`.
+This is a separate host-side workflow; the VM builder and version 1 bundle
+configuration format are unchanged.
+
+### System check
+
+**System check** (in the header) reports what this computer has for running
+Windows games, and opens automatically on first run or whenever Wine is
+missing. It checks Wine and its version, Wine's 32-bit support (classic or
+WoW64), the GPU driver, 64-bit and 32-bit Vulkan (needed for DXVK), free disk
+space, menu/desktop shortcut support, and the optional winetricks. Problems
+appear as **Required**, **Recommended**, or **Optional**, with install commands
+for Debian/Ubuntu, Fedora, Arch, or openSUSE that you can copy and run.
+
+The check is read-only: it never installs packages or asks for your password.
+It reads system files and runs only `wine --version`. After installing
+something, select **Check again**; a newly installed Wine is then prefilled in
+**Add game**. A banner in the library summarizes any remaining problems.
+
+1. Select **Add game**, name the game, and choose an EXE/MSI installer or an
+   already installed game EXE.
+2. Use **Browse...** to choose the source file, or type its absolute Linux
+   path. The Wine executable is prefilled with `/usr/bin/wine` (or the `wine`
+   on your `PATH`) when its matching `wineserver` is in the same directory;
+   change it to use another runner, such as Wine-GE's `bin/wine`. The field
+   is checked as you type, without running Wine. Proton's `proton` wrapper is
+   not supported here.
+3. Under **Compatibility and installer options**, choose the architecture.
+   Optionally provide an extracted DXVK release
+   directory with `x64/` and `x32/` DLLs, and a DXVK GPU name filter.
+   The prototype installs only `d3d11.dll` and `dxgi.dll`, for Direct3D 11.
+4. Continue to installation, then prepare the game. Installers appear on your
+   desktop; finish and close them (and any games they automatically open).
+   The wizard advances to testing when preparation finishes.
+5. Select the installed EXE from **Detected games**, browse the prefix's C:
+   drive, or type a `C:\...` or absolute Linux path. Detection searches the prefix's C: drive (including GOG Games, Games,
+   and AppData), skip Windows system directories and directory symlinks, and
+   rank likely game executables ahead of helpers. A clear match fills an empty
+   field without replacing your choice. Paths outside the prefix can be browsed
+   or entered as Linux paths. The EXE's parent is used as its working directory.
+6. Test the game, play it, and exit normally. On the Finish step, confirm
+   gameplay worked, choose **Shortcuts** (**Application menu** is selected by
+   default; **Desktop** is optional), then select **Save game**.
+
+After saving, the same **Shortcuts** checkboxes (in **Setup & details**, on
+the Finish step) add or remove the menu and desktop shortcuts immediately,
+without another test. Removing shortcuts does not remove the game.
+
+The library shows each game's setup status. Search by name, use **Continue
+setup** to resume an unfinished installation, or **Play** to launch a saved
+game with its confirmed executable and arguments. **Setup & details** opens
+the setup steps and activity log; full launcher, prefix, and desktop-entry
+paths are under **Technical details**. Running games and
+installers can be monitored from the library, with a confirmation before
+forcibly stopping them. Only one local operation can run at a time.
+
+Normal Play does not clear gameplay confirmation. To change the executable
+or launch arguments, return to the Test step, test the new settings, and save
+again. Missing game or runner paths are reported rather than silently changed.
+
+Every setup uses a **new** prefix in
+`~/.local/share/winebundle/local/<id>/prefix`, where `<id>` is a readable
+name derived from the game name (for example `blasphemous`, or
+`blasphemous-2` for a second copy). Setups created by earlier versions keep
+their existing hexadecimal folder names. The same folder stores
+`setup.json`, `activity.log`, and the saved `play.sh`. Saved setups appear in
+the library after restarting the GUI, and confirmed games can be played
+without another setup test. After a restart, test again before saving a new
+shortcut. Existing saved launchers work without the GUI running.
+Menu shortcuts go into `$XDG_DATA_HOME/applications` (normally
+`~/.local/share/applications`). Desktop shortcuts go into your desktop folder
+(`XDG_DESKTOP_DIR`, normally `~/Desktop`), are marked executable, and are
+marked trusted with `gio` when available so GNOME's desktop icons can launch
+them. If no desktop folder exists, the Desktop option is unavailable.
+The setup records the runner's reported version during preparation, but
+references its executable in place; it does not freeze or copy the runner.
+
+This is not a sandbox: installers and games have your user permissions.
+Use trusted software only. Existing game folders are used **in place**, not
+copied, and the game can modify their files. Back up saves first; existing
+prefixes, their registry settings, and their saves are not imported.
+Runners and game folders must stay at the recorded paths. No compatibility
+success, native conversion, runner bundling, automatic dependency repair,
+or gameplay validation is inferred from a successful process exit.
+
+Only one local operation runs at a time in a GUI server. Stop terminates
+only that setup's process group and Wine prefix; unsaved progress can be lost.
+Keep the GUI server running until the operation finishes, and do not run
+multiple GUI servers against the same local setups. Use a new setup to try a
+different runner or compatibility settings; there is no automatic migration
+or retry matrix. The prototype has no winetricks/dependency editor.
+
 ## Local web GUI
 
 Start the dependency-free local GUI from the repository root:
@@ -180,8 +279,18 @@ Start the dependency-free local GUI from the repository root:
 python3 gui/winebundle_gui.py
 ```
 
-The browser interface exposes installer, entrypoint, dependency, validation,
-and VM fields. It can:
+The GUI opens the game library in your browser. This milestone does not yet
+provide an installable desktop application or dedicated window.
+
+**Browse...** opens an in-app file browser served by the local GUI. Browser
+file inputs cannot reveal a file's real path, which the launcher needs, so
+the GUI lists folders itself (over its loopback, token-protected API) and
+filters them to the relevant file types. It starts from common places such
+as Home, Downloads, Games, and mounted drives, and remembers the last folder
+used for each field.
+
+Open **Advanced: VM bundle builder** to access installer, entrypoint,
+dependency, validation, and VM fields. The builder can:
 
 - validate and launch a build;
 - show build output and completion status;

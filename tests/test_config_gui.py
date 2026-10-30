@@ -6,6 +6,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +21,7 @@ from winebundle_config import (  # noqa: E402
     write_config,
 )
 from winebundle_gui import RequestHandler, WinebundleServer  # noqa: E402
+from local_setup import LocalSetup  # noqa: E402
 
 
 class ConfigTests(unittest.TestCase):
@@ -122,6 +124,83 @@ class GuiApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 403)
         self.assertIn("token", result["error"])
+
+    def test_picker_and_runner_routes_require_token(self):
+        status, session = self.request("GET", "/api/session")
+        self.assertIn("runner", session["local"])
+        self.assertNotIn("local", session["defaults"])
+        self.assertTrue(any(place["label"] == "Computer" for place in session["local"]["places"]))
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "setup.exe").write_text("x")
+            Path(directory, "notes.txt").write_text("x")
+            query = f"/api/browse?path={directory}&kind=installer"
+            self.assertEqual(self.request("GET", query)[0], 403)
+            status, result = self.request("GET", query, token=self.token)
+            self.assertEqual(status, 200)
+            self.assertEqual([entry["name"] for entry in result["entries"]], ["setup.exe"])
+            status, result = self.request("GET", f"/api/browse?path={directory}/missing", token=self.token)
+            self.assertEqual(status, 400)
+            self.assertIn("not found", result["error"])
+            self.assertEqual(self.request("GET", f"/api/runner?path={directory}")[0], 403)
+            status, result = self.request("GET", f"/api/runner?path={directory}/setup.exe", token=self.token)
+            self.assertEqual(status, 200)
+            self.assertIn("No executable", result["error"])
+
+    def test_system_check_route_requires_token(self):
+        self.assertEqual(self.request("GET", "/api/system")[0], 403)
+        status, result = self.request("GET", "/api/system", token=self.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(result["checks"][0]["id"], "wine")
+        self.assertIn("family", result["distro"])
+        self.assertIsInstance(result["ready"], bool)
+
+    def test_library_is_home_and_builder_remains_available(self):
+        for path, expected in (("/", "Your games"), ("/local", "Your games"),
+                               ("/builder", "Bundle inputs")):
+            with self.subTest(path=path):
+                connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+                connection.request("GET", path)
+                response = connection.getresponse()
+                content = response.read().decode()
+                connection.close()
+                self.assertEqual(response.status, 200)
+                self.assertIn(expected, content)
+
+    def test_local_routes_and_authorization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner = root / "wine"
+            runner.write_text("#!/bin/sh\nexit 0\n")
+            runner.chmod(0o755)
+            server = root / "wineserver"
+            server.write_text("#!/bin/sh\nexit 0\n")
+            server.chmod(0o755)
+            game = root / "game.exe"
+            game.write_text("game")
+            with patch.object(self.server, "local", LocalSetup(root / "setups")):
+                self.assertEqual(self.request("GET", "/api/local")[0], 403)
+                values = dict(name="API test", runner=str(runner),
+                              mode="existing", source=str(game))
+                self.assertEqual(self.request("POST", "/api/local", values)[0], 403)
+                status, result = self.request("POST", "/api/local", values, self.token)
+                self.assertEqual(status, 201)
+                game_id = result["id"]
+                status, setups = self.request("GET", "/api/local", token=self.token)
+                self.assertEqual(status, 200)
+                self.assertEqual(setups[0]["id"], game_id)
+                status, state = self.request("GET", f"/api/local/{game_id}", token=self.token)
+                self.assertEqual(state["config"]["name"], "API test")
+                self.assertEqual(self.request("POST", f"/api/local/{game_id}/save",
+                                             {"accepted": True}, self.token)[0], 400)
+                self.assertEqual(self.request("POST", f"/api/local/{game_id}/play", {})[0], 403)
+                self.assertEqual(self.request("POST", f"/api/local/{game_id}/play",
+                                             {}, self.token)[0], 400)
+                with patch.object(self.server.local, "start") as start:
+                    self.assertEqual(self.request("POST", f"/api/local/{game_id}/play",
+                                                 {}, self.token)[0], 202)
+                    start.assert_called_once_with(game_id, "play", {})
+                self.assertEqual(self.request("POST", "/api/local", [], self.token)[0], 400)
+                self.assertEqual(self.request("GET", "/api/local/not-an-id", token=self.token)[0], 400)
 
     def test_failed_job_reports_log(self):
         status, result = self.request(

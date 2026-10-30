@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Winebundle - Your games</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/local.js" defer></script>
+</head>
+<body class="local-setup">
+  <header>
+    <div>
+      <p class="eyebrow">Winebundle</p>
+      <h1>Your games</h1>
+      <p>Install once. Test it. Make it yours.</p>
+    </div>
+    <nav class="actions" aria-label="Main navigation">
+      <button id="home" class="secondary" type="button">Game library</button>
+      <button id="system-open" class="secondary" type="button">System check</button>
+      <a class="button secondary" href="/builder">Advanced: VM bundle builder</a>
+    </nav>
+  </header>
+  <main>
+    <p id="result" role="status" aria-live="polite"></p>
+    <div id="library">
+      <div class="section-heading">
+        <div><h2>Game library</h2><p class="muted">Your games and setups in progress, saved on this computer.</p></div>
+        <button id="add-game" type="button" disabled>Add game</button>
+      </div>
+      <div id="system-banner" class="system-banner" hidden>
+        <p id="system-banner-text"></p>
+        <button id="system-banner-open" class="secondary" type="button">Open system check</button>
+      </div>
+      <label class="search">Find a game<input id="search" type="search" placeholder="Search by name"></label>
+      <p id="library-status" role="status">Loading your library...</p>
+      <div id="games" class="game-grid"></div>
+    </div>
+    <div id="system" hidden>
+      <div class="section-heading">
+        <div>
+          <h2 id="system-title" tabindex="-1">System check</h2>
+          <p class="muted">What this computer needs to install and play Windows games. Nothing is installed or changed automatically.</p>
+        </div>
+        <div class="actions">
+          <button id="system-refresh" class="secondary" type="button">Check again</button>
+          <button id="system-back" type="button">Go to game library</button>
+        </div>
+      </div>
+      <p id="system-summary" role="status">Checking this computer...</p>
+      <p id="system-distro" class="muted"></p>
+      <ul id="system-checks" class="system-checks"></ul>
+      <p class="muted">Commands need your administrator password. Run them in a terminal, then select <strong>Check again</strong>.</p>
+    </div>
+    <div id="workspace" hidden>
+      <div class="section-heading">
+        <div><p class="eyebrow">Guided setup</p><h2 id="setup-title" tabindex="-1">Add a game</h2></div>
+        <button id="back-library" class="secondary" type="button">Back to library</button>
+      </div>
+      <nav class="setup-steps" aria-label="Setup progress">
+        <button type="button" data-step="1">1. Choose game</button>
+        <button type="button" data-step="2">2. Install</button>
+        <button type="button" data-step="3">3. Test</button>
+        <button type="button" data-step="4">4. Finish</button>
+      </nav>
+      <p id="summary" role="status"></p>
+      <form id="setup" data-panel="1">
+        <section>
+          <h2>Choose your game</h2>
+          <p>Use a trusted installer, or a game already installed on this computer.
+            Each game gets its own Wine environment (prefix). Existing game files
+            stay in place; back up your saves first.</p>
+          <div class="grid">
+            <label>Game name<input name="name" required autocomplete="off"></label>
+            <label>What are you adding?<select name="mode">
+              <option value="installer">EXE/MSI installer</option>
+              <option value="existing">Already installed game EXE</option>
+            </select></label>
+            <div class="wide field">
+              <label for="source" id="source-label">Installer file</label>
+              <div class="path-row">
+                <input id="source" name="source" required placeholder="Choose an .exe or .msi installer">
+                <button type="button" class="secondary" data-browse="source" aria-describedby="source-label">Browse...</button>
+              </div>
+            </div>
+            <div class="wide field">
+              <label for="runner">Wine executable</label>
+              <div class="path-row">
+                <input id="runner" name="runner" required placeholder="/usr/bin/wine" aria-describedby="runner-status runner-help">
+                <button type="button" class="secondary" data-browse="runner" aria-label="Browse for Wine executable">Browse...</button>
+              </div>
+              <p id="runner-status" class="field-status" role="status"></p>
+            </div>
+          </div>
+          <p id="runner-help" class="muted">Most systems use /usr/bin/wine. To use another version, such as
+            Wine-GE, choose its bin/wine. Proton's wrapper isn't supported. No runners are downloaded.</p>
+          <details>
+            <summary>Compatibility and installer options</summary>
+            <div class="grid advanced-fields">
+              <label>Architecture<select name="arch">
+                <option value="win64">64-bit</option><option value="win32">32-bit</option>
+              </select></label>
+              <div class="field">
+                <label for="dxvk">DXVK release folder (optional)</label>
+                <div class="path-row">
+                  <input id="dxvk" name="dxvk" placeholder="/path/to/dxvk">
+                  <button type="button" class="secondary" data-browse="dxvk" aria-label="Browse for DXVK release folder">Browse...</button>
+                </div>
+              </div>
+              <label class="wide">GPU name filter (optional, DXVK only)<input name="gpu"></label>
+              <label class="wide">Installer arguments (one per line; optional)<textarea name="installArgs" rows="2"></textarea></label>
+            </div>
+          </details>
+          <p class="muted">Local setup runs Windows software with your user permissions, not inside a sandbox or VM.
+            Keep the runner and game files at their chosen paths.</p>
+          <button type="submit">Continue to installation</button>
+        </section>
+      </form>
+      <section data-panel="2" hidden>
+        <h2>Prepare your game</h2>
+        <p id="install-help"></p>
+        <button id="prepare" type="button" disabled>Prepare and open installer</button>
+        <button id="to-test" type="button" hidden>Continue to game test</button>
+        <p class="muted">If preparation fails, expand the activity log below before retrying.
+          Don't start another GUI server against the same setups.</p>
+      </section>
+      <section data-panel="3" hidden>
+        <h2>Choose the executable and test</h2>
+        <p>Play briefly, then exit normally. Opening a window alone does not confirm the game works.</p>
+        <label>Detected games<select id="candidates"><option value="">Choose a detected game, or browse</option></select></label>
+        <p id="detection" class="muted"></p>
+        <div class="field">
+          <label for="entrypoint">Game executable</label>
+          <div class="path-row">
+            <input id="entrypoint" aria-describedby="entrypoint-help">
+            <button type="button" class="secondary" data-browse="entrypoint" aria-label="Browse for game executable">Browse...</button>
+          </div>
+          <p id="entrypoint-help" class="field-status">C:\ is this game's own Windows drive. A Linux path also works for games installed elsewhere.</p>
+        </div>
+        <details>
+          <summary>Launch arguments</summary>
+          <label class="advanced-fields">Game arguments (one per line)<textarea id="args" rows="2"></textarea></label>
+        </details>
+        <button id="test" type="button" disabled>Test game</button>
+        <button id="to-finish" type="button" hidden>Continue to confirmation</button>
+      </section>
+      <section data-panel="4" hidden>
+        <h2 id="finish-title">Did the game work?</h2>
+        <p id="finish-help">Confirm gameplay worked to add Play to your library and create the shortcuts you choose.</p>
+        <label class="check" id="acceptance"><input id="accepted" type="checkbox"> I tested gameplay and it works</label>
+        <fieldset id="shortcuts">
+          <legend>Shortcuts</legend>
+          <label class="check"><input id="shortcut-menu" type="checkbox" checked> Application menu</label>
+          <label class="check"><input id="shortcut-desktop" type="checkbox"> Desktop</label>
+          <p id="shortcut-status" class="field-status" role="status"></p>
+        </fieldset>
+        <button id="save" type="button" disabled>Save game</button>
+        <button id="play" type="button" hidden>Play game</button>
+        <button id="retest" class="secondary" type="button">Back to game test</button>
+        <details id="technical" hidden>
+          <summary>Technical details</summary>
+          <dl id="technical-paths" class="advanced-fields"></dl>
+        </details>
+      </section>
+      <div id="operation-controls" hidden>
+        <p>Keep this server running until the operation finishes. You can return to the library.</p>
+        <button id="stop" class="secondary" type="button" disabled>Stop game / installer</button>
+        <p class="muted">Stopping forcibly closes this game's Wine processes. Unsaved progress may be lost.</p>
+      </div>
+      <details id="activity">
+        <summary>Activity log and troubleshooting</summary>
+        <p class="advanced-fields">Check that the game and runner paths still exist. Installer windows appear on your
+          desktop; finish and close them, including any game they open. Compatibility changes currently
+          require a new setup; this app does not automatically repair dependencies.</p>
+        <pre id="log" tabindex="0" aria-label="Setup and game output"></pre>
+        <button id="retry-refresh" class="secondary" type="button">Refresh status</button>
+      </details>
+    </div>
+  </main>
+  <dialog id="picker" aria-labelledby="picker-title" aria-describedby="picker-filter">
+    <div class="picker-header">
+      <div><h2 id="picker-title">Choose a file</h2><p id="picker-filter" class="muted"></p></div>
+      <button id="picker-cancel" class="secondary" type="button">Cancel</button>
+    </div>
+    <div class="picker-body">
+      <nav aria-label="Places"><ul id="picker-places" class="picker-places"></ul></nav>
+      <div class="picker-main">
+        <form id="picker-go" class="path-row">
+          <button id="picker-up" class="secondary" type="button" aria-label="Up one folder">Up</button>
+          <label class="visually-hidden" for="picker-path">Folder</label>
+          <input id="picker-path" autocomplete="off" spellcheck="false">
+          <button class="secondary" type="submit">Go</button>
+        </form>
+        <label class="check"><input id="picker-hidden" type="checkbox"> Show hidden files</label>
+        <p id="picker-status" role="status" class="muted"></p>
+        <ul id="picker-entries" class="picker-entries" aria-label="Folder contents"></ul>
+      </div>
+    </div>
+    <div class="picker-footer">
+      <p id="picker-selection" class="muted"></p>
+      <button id="picker-choose" type="button" disabled>Choose</button>
+    </div>
+  </dialog>
+</body>
+</html>

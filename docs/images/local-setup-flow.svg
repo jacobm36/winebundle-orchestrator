@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="330" viewBox="0 0 1120 330" role="img" aria-labelledby="title description">
+  <title id="title">Local assisted game setup workflow</title>
+  <desc id="description">Create an isolated Wine prefix, install or select a game, test actual gameplay, then save a launcher.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f4f7ff"/>
+      <stop offset="1" stop-color="#eaf7f4"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0 10 5 0 10Z" fill="#72819a"/>
+    </marker>
+    <style>
+      text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; fill: #17243b; }
+      .title { font-size: 23px; font-weight: 750; }
+      .step { font-size: 17px; font-weight: 700; }
+      .body { font-size: 14px; fill: #46556e; }
+      .number { font-size: 14px; font-weight: 750; fill: #fff; }
+      .note { font-size: 14px; font-weight: 650; fill: #6a3b13; }
+    </style>
+  </defs>
+  <rect x="1" y="1" width="1118" height="328" rx="22" fill="url(#background)" stroke="#d8e1ee"/>
+  <text class="title" x="36" y="47">From installer to a menu shortcut</text>
+
+  <path d="M276 157h28" stroke="#72819a" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M548 157h28" stroke="#72819a" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M820 157h28" stroke="#72819a" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <g transform="translate(36 78)">
+    <rect width="240" height="148" rx="16" fill="#fff" stroke="#cbd7e8"/>
+    <circle cx="27" cy="29" r="15" fill="#4169e1"/>
+    <text class="number" x="27" y="34" text-anchor="middle">1</text>
+    <text class="step" x="52" y="35">Create setup</text>
+    <text class="body" x="20" y="72">Choose a game, source,</text>
+    <text class="body" x="20" y="94">Wine runner, and a new</text>
+    <text class="body" x="20" y="116">separate prefix.</text>
+  </g>
+  <g transform="translate(308 78)">
+    <rect width="240" height="148" rx="16" fill="#fff" stroke="#cbd7e8"/>
+    <circle cx="27" cy="29" r="15" fill="#25836c"/>
+    <text class="number" x="27" y="34" text-anchor="middle">2</text>
+    <text class="step" x="52" y="35">Install or prepare</text>
+    <text class="body" x="20" y="72">Run the installer, or use</text>
+    <text class="body" x="20" y="94">an existing game folder.</text>
+    <text class="body" x="20" y="116">Wait for the operation to finish.</text>
+  </g>
+  <g transform="translate(580 78)">
+    <rect width="240" height="148" rx="16" fill="#fff" stroke="#cbd7e8"/>
+    <circle cx="27" cy="29" r="15" fill="#b46a18"/>
+    <text class="number" x="27" y="34" text-anchor="middle">3</text>
+    <text class="step" x="52" y="35">Select and test</text>
+    <text class="body" x="20" y="72">Pick the installed game EXE.</text>
+    <text class="body" x="20" y="94">Play, check controls and sound,</text>
+    <text class="body" x="20" y="116">then exit normally.</text>
+  </g>
+  <g transform="translate(852 78)">
+    <rect width="232" height="148" rx="16" fill="#fff" stroke="#cbd7e8"/>
+    <circle cx="27" cy="29" r="15" fill="#7652b5"/>
+    <text class="number" x="27" y="34" text-anchor="middle">4</text>
+    <text class="step" x="52" y="35">Save and launch</text>
+    <text class="body" x="20" y="72">Confirm gameplay works,</text>
+    <text class="body" x="20" y="94">save the launcher, and find</text>
+    <text class="body" x="20" y="116">it in your app menu.</text>
+  </g>
+
+  <rect x="36" y="250" width="1048" height="48" rx="12" fill="#fff4e5" stroke="#f0d2a9"/>
+  <path d="M58 284 69 263l11 21Z" fill="#c57a20"/>
+  <text x="69" y="279" text-anchor="middle" font-size="14" font-weight="800" fill="#fff">!</text>
+  <text class="note" x="92" y="280">Safety: this runs Windows software as your Linux user, not inside a VM. Only use installers you trust.</text>
+</svg>

@@ -13,7 +13,7 @@ import uuid
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +26,8 @@ from winebundle_config import (  # noqa: E402
     validate_config,
     write_config,
 )
+from local_setup import LocalSetup, browse, check_runner, default_runner, places  # noqa: E402
+import system_check  # noqa: E402
 
 
 MAX_REQUEST_SIZE = 1024 * 1024
@@ -121,6 +123,7 @@ class WinebundleServer(ThreadingHTTPServer):
         super().__init__(address, handler)
         self.token = token
         self.jobs = JobStore()
+        self.local = LocalSetup()
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -201,13 +204,36 @@ class RequestHandler(BaseHTTPRequestHandler):
                         "skipProvision": False,
                         "keepVm": False,
                     },
+                    "local": {"runner": default_runner(), "places": places()},
                 },
             )
+            return
+        if path == "/api/system":
+            if not self._authorized():
+                self._send_json(403, {"error": "invalid session token"})
+            else:
+                self._send_json(200, system_check.run(self.server.local.root))
+            return
+        if path in ("/api/browse", "/api/runner"):
+            if not self._authorized():
+                self._send_json(403, {"error": "invalid session token"})
+                return
+            query = parse_qs(urlparse(self.path).query)
+            value = query.get("path", [""])[0]
+            try:
+                if path == "/api/runner":
+                    self._send_json(200, check_runner(value))
+                else:
+                    self._send_json(200, browse(value, query.get("kind", ["installer"])[0],
+                                                query.get("hidden", ["0"])[0] == "1"))
+            except (ConfigError, OSError) as exc:
+                self._send_json(400, {"error": str(exc)})
             return
         if path.startswith("/api/jobs/"):
             if not self._authorized():
                 self._send_json(403, {"error": "invalid session token"})
                 return
+
             job = self.server.jobs.get(path.removeprefix("/api/jobs/"))
             if job is None:
                 self._send_json(404, {"error": "job not found"})
@@ -215,10 +241,25 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._send_json(200, job)
             return
 
+        if path == "/api/local" or path.startswith("/api/local/"):
+            if not self._authorized():
+                self._send_json(403, {"error": "invalid session token"})
+                return
+            try:
+                result = (self.server.local.list() if path == "/api/local"
+                          else self.server.local.get(path.removeprefix("/api/local/")))
+                self._send_json(200, result)
+            except (ConfigError, OSError) as exc:
+                self._send_json(400, {"error": str(exc)})
+            return
+
         static_path = {
-            "/": STATIC / "index.html",
+            "/": STATIC / "local.html",
+            "/builder": STATIC / "index.html",
             "/app.css": STATIC / "app.css",
             "/app.js": STATIC / "app.js",
+            "/local": STATIC / "local.html",
+            "/local.js": STATIC / "local.js",
         }.get(path)
         if static_path is None:
             self._send_json(404, {"error": "not found"})
@@ -241,6 +282,30 @@ class RequestHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             request = self._read_json()
+            if not isinstance(request, dict):
+                raise ConfigError("request must be an object")
+            if path == "/api/local":
+                self._send_json(201, {"id": self.server.local.create(request)})
+                return
+            if path.startswith("/api/local/"):
+                parts = path.removeprefix("/api/local/").split("/")
+                if len(parts) != 2:
+                    raise ConfigError("invalid local operation URL")
+                game_id, action = parts
+                if action == "save":
+                    self._send_json(200, self.server.local.save(
+                        game_id, request.get("accepted"),
+                        request.get("menu", True), request.get("desktop", False)))
+                elif action == "shortcuts":
+                    self._send_json(200, self.server.local.shortcuts(
+                        game_id, request.get("menu"), request.get("desktop")))
+                elif action == "stop":
+                    self.server.local.stop(game_id)
+                    self._send_json(200, {"stopped": True})
+                else:
+                    self.server.local.start(game_id, action, request)
+                    self._send_json(202, {"id": game_id})
+                return
             config = validate_config(request.get("config"))
             if path == "/api/config/validate":
                 self._send_json(200, {"valid": True})
@@ -249,7 +314,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._send_json(202, {"jobId": job_id})
             else:
                 self._send_json(404, {"error": "not found"})
-        except (AttributeError, ConfigError) as exc:
+        except (AttributeError, ConfigError, OSError, subprocess.SubprocessError) as exc:
             self._send_json(400, {"error": str(exc)})
 
 
