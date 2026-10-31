@@ -84,6 +84,9 @@ class SystemCheckTests(unittest.TestCase):
         for bits, folder in ((64, "usr/lib/x86_64-linux-gnu"), (32, "usr/lib/i386-linux-gnu")):
             for library in ("libvulkan.so.1", "libvulkan_intel.so", "libGLX_nvidia.so.0"):
                 elf(self.root / folder / library, bits)
+        typelibs = self.root / "usr/lib/x86_64-linux-gnu/girepository-1.0"
+        typelibs.mkdir(parents=True)
+        (typelibs / "WebKit-6.0.typelib").write_text("")
         result, checks = self.run_checks(runner)
         self.assertEqual({key: check["status"] for key, check in checks.items()},
                          dict.fromkeys(checks, "ok"))
@@ -91,6 +94,8 @@ class SystemCheckTests(unittest.TestCase):
         self.assertEqual((result["errors"], result["warnings"]), (0, 0))
         self.assertIn("wine-9.0", checks["wine"]["detail"])
         self.assertEqual(result["runner"], runner)
+        self.assertEqual(result["runnerVersion"], "wine-9.0")
+        self.assertNotIn("version", checks["wine"])
         self.assertEqual(checks["gpu"]["detail"], "Intel (i915 driver), NVIDIA (nvidia driver).")
         self.assertEqual(result["distro"]["name"], "Ubuntu 24.04 LTS")
 
@@ -107,6 +112,7 @@ class SystemCheckTests(unittest.TestCase):
         result, checks = self.run_checks("")
         self.assertFalse(result["ready"])
         self.assertEqual(checks["wine"]["status"], "error")
+        self.assertEqual(result["runnerVersion"], "")
         self.assertIn("sudo apt install wine wine32:i386", checks["wine"]["fix"]["commands"])
         self.assertEqual(checks["wine32"]["status"], "skipped")
         self.assertEqual(checks["vulkan"]["status"], "ok")
@@ -157,6 +163,23 @@ class SystemCheckTests(unittest.TestCase):
         self.assertEqual(checks["gpu"]["status"], "warning")
         self.assertEqual(result["warnings"], 5)
         self.assertTrue(os.access(runner, os.X_OK))
+
+
+class AppWindowCheckTests(unittest.TestCase):
+    def test_app_window_check(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            missing = system_check.check_app_window(root, "fedora", has_gi=True)
+            self.assertEqual(missing["status"], "optional")
+            self.assertEqual(missing["fix"]["commands"],
+                             ["sudo dnf install python3-gobject webkitgtk6.0"])
+            typelibs = root / "usr/lib/x86_64-linux-gnu/girepository-1.0"
+            typelibs.mkdir(parents=True)
+            (typelibs / "WebKit2-4.1.typelib").write_text("")
+            self.assertEqual(system_check.check_app_window(root, "debian", has_gi=True)["status"],
+                             "ok")
+            self.assertEqual(system_check.check_app_window(root, "debian", has_gi=False)["status"],
+                             "optional")
 
 
 if __name__ == "__main__":

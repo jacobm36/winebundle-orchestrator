@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.jacobm36.Winebundle</id>
+  <name>Winebundle</name>
+  <summary>Install and play Windows games with Wine</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.jacobm36">
+    <name>jacobm36</name>
+  </developer>
+  <description>
+    <p>
+      Winebundle guides you through installing a Windows game on Linux. Each game
+      gets its own Wine environment, so games can't break each other.
+    </p>
+    <ul>
+      <li>Check that this computer has what Windows games need, with commands to fix anything missing</li>
+      <li>Install from a game installer, or add a game that's already installed</li>
+      <li>Test the game before saving it to your library</li>
+      <li>Add application menu and desktop shortcuts for each game</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.jacobm36.Winebundle.desktop</launchable>
+  <url type="homepage">https://github.com/jacobm36/winebundle-orchestrator</url>
+  <categories>
+    <category>Game</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-30"/>
+  </releases>
+</component>

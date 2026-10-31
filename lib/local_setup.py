@@ -8,6 +8,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import threading
 import unicodedata
 from pathlib import Path
@@ -17,6 +18,7 @@ from winebundle_config import ConfigError
 
 # New setups use readable names; older setups use 32-character hex IDs, which also match.
 GAME_ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+PICKER_KINDS = ("installer", "exe", "runner", "folder")
 MAX_BROWSE_ENTRIES = 5000
 BROWSE_KINDS = {
     "installer": (".exe", ".msi"),
@@ -24,6 +26,135 @@ BROWSE_KINDS = {
     "runner": None,
     "folder": (),
 }
+
+
+# Store apps and web installers that download a game (or a whole store) instead of
+# containing it. Matched by file name, or by the product name in the EXE's version
+# information, which survives renaming.
+STORE_INSTALLERS = (
+    ("GOG Galaxy", re.compile(r"^gog_?galaxy", re.I), ("GOG Galaxy - Game Installer",
+                                                        "GOG GALAXY Installer")),
+    ("Steam", re.compile(r"^steamsetup", re.I), ()),
+    ("Epic Games Launcher", re.compile(r"^epic(games)?(launcher)?installer", re.I), ()),
+    ("EA app", re.compile(r"^ea_?app_?installer|^origin_?thin_?setup", re.I), ()),
+    ("Ubisoft Connect", re.compile(r"^ubisoft_?connect_?installer|^uplayinstaller", re.I), ()),
+    ("Battle.net", re.compile(r"^battle\.net[-_ ]?setup", re.I), ()),
+)
+STORE_SCAN_BYTES = 8 * 1024 * 1024
+
+
+def web_installer(path):
+    """Describe a store app or web installer chosen as a game installer, or return None."""
+    path = Path(path)
+    store = next((name for name, pattern, _ in STORE_INSTALLERS
+                  if pattern.search(path.name)), None)
+    if store is None:
+        markers = [(name, marker.encode("utf-16-le"))
+                   for name, _, labels in STORE_INSTALLERS for marker in labels]
+        try:
+            with path.open("rb") as stream:
+                data = stream.read(STORE_SCAN_BYTES)
+        except OSError:
+            return None
+        store = next((name for name, marker in markers if marker in data), None)
+    if store is None:
+        return None
+    if store == "GOG Galaxy":
+        return {"store": store, "message": (
+            "This is a GOG Galaxy web installer, not the game's installer. It installs the "
+            "GOG Galaxy app, which needs Microsoft .NET and then downloads the game, so it "
+            "usually fails in Wine."), "advice": (
+            "On GOG.com, open the game in your library and download the offline backup "
+            "installer instead. Its file name starts with setup_.")}
+    return {"store": store, "message": (
+        f"This is the {store} installer, a store app rather than a game. Store apps "
+        "download games themselves and often need Windows components that Wine lacks."),
+        "advice": ("Download an offline installer for the game if the store offers one. "
+                   "For Steam games, Steam for Linux runs Windows games with Proton.")}
+
+
+INSTALLER_MARKERS = tuple(marker for text in ("Inno Setup", "Nullsoft", "InstallShield")
+                          for marker in (text.encode(), text.encode("utf-16-le")))
+NAME_AFFIX = re.compile(r"^(?i:setup|install(?:er)?)(?:[-_ ]+|(?=[A-Z]))|"
+                        r"(?:[-_ ]+(?i:setup|install(?:er)?)|(?<=[a-z])(?:Setup|Installer?))$")
+# Platform and build words that end a game name, such as Game-Win64-Shipping or _x64.
+NAME_TAIL = re.compile(r"[-_ .](?:win(?:32|64)|x(?:64|86)|(?:32|64)[-_ ]?bit|shipping|"
+                       r"dx(?:9|10|11|12)|vulkan|gog|multi\d*)(?![a-z]).*$", re.I)
+NAME_VERSION = re.compile(r"^(?:v?\d+(?:\.\d+)+[a-z]?|v\d+|build\d+|r\d+|\d{5,})$", re.I)
+SMALL_WORDS = {"a", "an", "and", "at", "by", "for", "in", "of", "on", "or", "the", "to"}
+ROMAN = re.compile(r"^(?=[ivx])(?:x{0,3})(?:ix|iv|v?i{0,3})$")
+GENERIC_NAMES = {"", "setup", "install", "installer", "game", "launcher", "start", "play",
+                 "main", "run", "app", "client", "bin", "bin32", "bin64", "binaries", "win32",
+                 "win64", "x64", "x86", "release", "retail", "shipping", "exe", "disc",
+                 "cdrom", "dvd"}
+NAME_STOPS = {"downloads", "desktop", "documents", "games", "gog games", "program files",
+              "program files (x86)", "drive_c", "steamapps", "common", "home", "tmp", "media",
+              "mnt", "opt", "usr", "run"}
+
+
+def looks_like_installer(path):
+    """Whether a Windows file is probably a setup program rather than a game."""
+    path = Path(path)
+    if path.suffix.lower() == ".msi" or re.search(r"setup|install", path.stem, re.I):
+        return True
+    try:
+        with path.open("rb") as stream:
+            data = stream.read(STORE_SCAN_BYTES)
+    except OSError:
+        return False
+    return any(marker in data for marker in INSTALLER_MARKERS)
+
+
+def _clean_name(text, installer):
+    if installer:
+        text = NAME_AFFIX.sub("", text)
+    text = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", text)
+    text = NAME_TAIL.sub("", text)
+    words = []
+    for word in re.split(r"[_\s]+", text):
+        if NAME_VERSION.match(word):
+            break
+        if word:
+            words.append(word)
+    if len(words) == 1 and not re.search(r"[-.]", words[0]):
+        words = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", words[0]).split()
+    name = " ".join(words).strip(" -.")
+    if name and name == name.lower():
+        name = " ".join(word.upper() if ROMAN.match(word) else
+                        word if index and word in SMALL_WORDS else word[:1].upper() + word[1:]
+                        for index, word in enumerate(name.split()))
+    return name
+
+
+def suggest_name(path, mode="installer"):
+    """Guess a readable game name from an installer or game file path, or return ""."""
+    if not isinstance(path, str) or "\0" in path:
+        return ""
+    path = Path(path)
+    stem = _clean_name(path.stem, installer=mode != "existing")
+    folder = ""
+    home = Path.home()
+    for parent in list(path.parents)[:4]:
+        if parent in (home, Path(parent.anchor)) or parent.name.lower() in NAME_STOPS:
+            break
+        folder = _clean_name(parent.name, installer=False)
+        if folder.lower() not in GENERIC_NAMES:
+            break
+    stem = stem if stem.lower() not in GENERIC_NAMES and len(stem) > 1 else ""
+    folder = folder if folder.lower() not in GENERIC_NAMES and len(folder) > 3 else ""
+    # Installed games usually live in a readably named folder; installers carry the name.
+    return (folder or stem) if mode == "existing" else (stem or folder)
+
+
+def check_source(value, mode="installer"):
+    """Describe a chosen game or installer file: a suggested name, its kind, and warnings."""
+    if not isinstance(value, str) or not value.startswith("/") or "\0" in value:
+        return {"warning": None, "name": "", "kind": None}
+    path = Path(value)
+    if not path.is_file():
+        return {"warning": None, "name": "", "kind": None}
+    return {"warning": web_installer(path), "name": suggest_name(value, mode),
+            "kind": "installer" if looks_like_installer(path) else "exe"}
 
 
 def game_slug(name):
@@ -54,6 +185,12 @@ def default_runner():
         if candidate and not check_runner(candidate)["error"]:
             return candidate
     return ""
+
+
+def desktop_exec(path):
+    """Quote a program path for a .desktop Exec line, which has its own quoting rules."""
+    return path.replace("\\", "\\\\").replace('"', '\\"').replace(
+        "`", "\\`").replace("$", "\\$").replace("%", "%%")
 
 
 def applications_folder():
@@ -160,6 +297,56 @@ class LocalSetup:
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(config, indent=2) + "\n")
         temporary.replace(path)
+
+    def preferences(self):
+        try:
+            stored = json.loads((self.root / "preferences.json").read_text())
+        except (OSError, ValueError):
+            stored = {}
+        if not isinstance(stored, dict):
+            stored = {}
+        folders = stored.get("pickerFolders")
+        if not isinstance(folders, dict):
+            folders = {}
+        return {"systemChecked": stored.get("systemChecked") is True,
+                "pickerFolders": {kind: path for kind, path in folders.items()
+                                  if kind in PICKER_KINDS and isinstance(path, str)}}
+
+    def set_preferences(self, values):
+        if not isinstance(values, dict) or set(values) - {"systemChecked", "pickerFolders"}:
+            raise ConfigError("unknown preference")
+        with self.lock:
+            current = self.preferences()
+            if "systemChecked" in values:
+                if not isinstance(values["systemChecked"], bool):
+                    raise ConfigError("systemChecked must be true or false")
+                current["systemChecked"] = values["systemChecked"]
+            folders = values.get("pickerFolders", {})
+            if not isinstance(folders, dict):
+                raise ConfigError("pickerFolders must be an object")
+            for kind, path in folders.items():
+                if (kind not in PICKER_KINDS or not isinstance(path, str) or len(path) > 4096
+                        or "\0" in path or (path and not path.startswith("/"))):
+                    raise ConfigError("invalid picker folder")
+                current["pickerFolders"][kind] = path
+            self.root.mkdir(parents=True, exist_ok=True)
+            path = self.root / "preferences.json"
+            temporary = path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(current, indent=2) + "\n")
+            temporary.replace(path)
+            return current
+
+    def busy(self):
+        """Describe the running operation, or return None when idle."""
+        with self.lock:
+            if not self.active:
+                return None
+            action = self.jobs.get(self.active, {}).get("action", "")
+            try:
+                name = self._read(self.active).get("name") or self.active
+            except ConfigError:
+                name = self.active
+            return {"id": self.active, "action": action, "name": name}
 
     def list(self):
         if not self.root.exists():
@@ -275,6 +462,9 @@ class LocalSetup:
         if Path(source).suffix.lower() not in (".exe", ".msi") or (
                 mode == "existing" and Path(source).suffix.lower() != ".exe"):
             raise ConfigError("choose an EXE game, or EXE/MSI installer")
+        warning = web_installer(source)
+        if warning and values.get("allowWebInstaller") is not True:
+            raise ConfigError(f"{warning['message']} {warning['advice']}")
         arch = values.get("arch", "win64")
         if arch not in ("win32", "win64"):
             raise ConfigError("architecture must be win32 or win64")
@@ -312,6 +502,44 @@ class LocalSetup:
             config["id"] = game_id
             self._write(game_id, config)
         return game_id
+
+    def remove(self, game_id):
+        """Delete a setup: its Wine environment, launcher and shortcuts.
+
+        An installed game's own folder (chosen with "existing") is outside the setup and
+        is kept.
+        """
+        with self.lock:
+            directory = self._directory(game_id)
+            if self.active == game_id:
+                raise ConfigError("stop this game's installer or game before removing it")
+            if directory.is_symlink() or not directory.is_dir():
+                raise ConfigError("this game is no longer in the library")
+            try:
+                config = self._read(game_id)
+            except ConfigError:
+                config = {}
+            filename = f"winebundle-{game_id}.desktop"
+            for key in ("desktop", "desktopShortcut"):
+                shortcut = Path(config.get(key) or "")
+                if shortcut.name == filename and (shortcut.is_file() or shortcut.is_symlink()):
+                    shortcut.unlink()
+            server = config.get("wineserver")
+            if server and (directory / "prefix").is_dir():
+                # A game started from a shortcut may still be using this prefix.
+                env = {key: value for key, value in os.environ.items()
+                       if not key.startswith("WINE")}
+                env["WINEPREFIX"] = str(directory / "prefix")
+                try:
+                    subprocess.run([server, "-k"], env=env, timeout=15, check=False,
+                                   stdin=subprocess.DEVNULL, capture_output=True)
+                except (OSError, subprocess.SubprocessError):
+                    pass
+            _remove_tree(directory)
+            self.jobs.pop(game_id, None)
+            return {"removed": game_id, "name": config.get("name") or game_id,
+                    "kept": config.get("source", "") if config.get("mode") == "existing"
+                    else ""}
 
     def _environment(self, game_id, config):
         env = os.environ.copy()
@@ -508,9 +736,7 @@ class LocalSetup:
                 "desktopFolder": str(folder) if folder else ""}
 
     def _apply_shortcuts(self, game_id, config, menu, desktop):
-        # Desktop Exec has its own quoting rules, independent of shell quoting.
-        quoted = config["launcher"].replace("\\", "\\\\").replace('"', '\\"').replace(
-            "`", "\\`").replace("$", "\\$").replace("%", "%%")
+        quoted = desktop_exec(config["launcher"])
         name = config["name"].replace("\\", "\\\\")
         entry = (f'[Desktop Entry]\nType=Application\nName={name}\n'
                  f'Exec="{quoted}"\nTerminal=false\nCategories=Game;\n')
@@ -547,3 +773,21 @@ class LocalSetup:
                            stderr=subprocess.DEVNULL, env=env, timeout=5, check=False)
         except (OSError, subprocess.SubprocessError):
             pass
+
+
+def _remove_tree(path):
+    def retry(function, failed, _exc):
+        # Windows installers sometimes leave read-only files and folders behind.
+        os.chmod(Path(failed).parent, 0o700)
+        if not Path(failed).is_symlink():
+            os.chmod(failed, 0o700)
+        function(failed)
+
+    try:
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(path, onexc=retry)
+        else:
+            shutil.rmtree(path, onerror=lambda function, failed, info:
+                          retry(function, failed, info[1]))
+    except OSError as exc:
+        raise ConfigError(f"couldn't remove all of this game's files: {exc}") from exc

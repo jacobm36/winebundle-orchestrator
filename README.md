@@ -177,40 +177,73 @@ or `bin/winebundle-vm run --config ./game.json`.
 For a worked desktop installation example, see the
 [local setup tutorial](LOCAL-SETUP-TUTORIAL.md).
 
-Start the GUI below to open **Your games**. The library is the default home
-screen; `/local` remains an alias. The VM builder is available through
-**Advanced: VM bundle builder** at `/builder`.
-This is a separate host-side workflow; the VM builder and version 1 bundle
+Open the [desktop app](#desktop-app) (or the [web GUI](#local-web-gui)) to
+see the home screen. It leads with **Bring your Windows games to Linux**:
+choose **A game installer** (setup `.exe`/`.msi`) or **An installed game** (the
+game's own `.exe`) to start the guided setup. **Your Windows games**, the library with
+**Play** and setup details for each game, is listed below it. `/local` remains
+an alias. The app bar has two sections: **Game library** and **System check**.
+The VM bundle builder is a developer tool, not part of the app; see
+[Local web GUI](#local-web-gui). The VM builder and version 1 bundle
 configuration format are unchanged.
+
+### Getting started
+
+The first time Winebundle opens, and whenever the library has no games, it
+shows **Getting started**, a three-step guide:
+
+1. **Check this computer** runs the System check below and lists only what
+   needs attention, with copyable install commands.
+2. **Add your first game** asks whether you have a game installer (setup
+   `.exe`/`.msi`) or an already installed game `.exe`, and opens the guided
+   setup with that choice made. These buttons stay disabled until anything
+   **Required** (such as Wine) is installed.
+3. **Test, save and play** explains what happens next.
+
+**Skip to game library** leaves the guide; an empty library links back to it.
+Once a game has been added, Winebundle opens to the library instead.
 
 ### System check
 
 **System check** (in the header) reports what this computer has for running
-Windows games, and opens automatically on first run or whenever Wine is
-missing. It checks Wine and its version, Wine's 32-bit support (classic or
+Windows games. It opens automatically when Wine is missing and the library
+already has games. It checks Wine and its version, Wine's 32-bit support (classic or
 WoW64), the GPU driver, 64-bit and 32-bit Vulkan (needed for DXVK), free disk
-space, menu/desktop shortcut support, and the optional winetricks. Problems
+space, menu/desktop shortcut support, the optional winetricks, and whether
+WebKitGTK is available for the app window. Problems
 appear as **Required**, **Recommended**, or **Optional**, with install commands
 for Debian/Ubuntu, Fedora, Arch, or openSUSE that you can copy and run.
 
 The check is read-only: it never installs packages or asks for your password.
 It reads system files and runs only `wine --version`. After installing
-something, select **Check again**; a newly installed Wine is then prefilled in
-**Add game**. A banner in the library summarizes any remaining problems.
+something, select **Check again**; a newly installed Wine is then prefilled
+when you add a game. A banner in the library summarizes any remaining problems.
 
-1. Select **Add game**, name the game, and choose an EXE/MSI installer or an
-   already installed game EXE.
+1. On the home screen, choose **A game installer** (EXE/MSI) or
+   **An installed game** (the game's EXE), then name the game. Step 1 keeps
+   that choice; its link (**The game is already installed** /
+   **I have an installer instead**) switches it. You can also drag the file
+   onto the Winebundle window from your file manager: an installer (a `.msi`,
+   or an `.exe` that is named like a setup program or built with Inno Setup,
+   NSIS or InstallShield) starts an installer setup, and any other `.exe`
+   starts an installed-game setup. Dropping a game `.exe` during **Test**
+   selects it as the game to test.
 2. Use **Browse...** to choose the source file, or type its absolute Linux
-   path. The Wine executable is prefilled with `/usr/bin/wine` (or the `wine`
-   on your `PATH`) when its matching `wineserver` is in the same directory;
-   change it to use another runner, such as Wine-GE's `bin/wine`. The field
-   is checked as you type, without running Wine. Proton's `proton` wrapper is
-   not supported here.
-3. Under **Compatibility and installer options**, choose the architecture.
+   path. The game name is filled in from the file, for example
+   **Blasphemous** from GOG's `setup_blasphemous_4.0.67.1_(64bit)_(85598).exe`,
+   or from the game's folder for an installed game; a name you've typed is
+   never replaced. Below it, a single line such as **Using Wine 9.0.** shows the Wine
+   that will be used: `/usr/bin/wine` (or the `wine` on your `PATH`) when its
+   matching `wineserver` is in the same directory. Select **Change** to use
+   another runner, such as Wine-GE's `bin/wine`; the field is checked as you
+   type, without running Wine. If Wine is missing or invalid, the options open
+   with the problem shown. Proton's `proton` wrapper is not supported here.
+3. Under **Wine and compatibility options**, choose the architecture.
    Optionally provide an extracted DXVK release
    directory with `x64/` and `x32/` DLLs, and a DXVK GPU name filter.
    The prototype installs only `d3d11.dll` and `dxgi.dll`, for Direct3D 11.
-4. Continue to installation, then prepare the game. Installers appear on your
+4. Continue to installation, then select **Open the installer** (or **Set up
+   Wine for this game** for an installed game). Installers appear on your
    desktop; finish and close them (and any games they automatically open).
    The wizard advances to testing when preparation finishes.
 5. Select the installed EXE from **Detected games**, browse the prefix's C:
@@ -219,13 +252,30 @@ something, select **Check again**; a newly installed Wine is then prefilled in
    rank likely game executables ahead of helpers. A clear match fills an empty
    field without replacing your choice. Paths outside the prefix can be browsed
    or entered as Linux paths. The EXE's parent is used as its working directory.
-6. Test the game, play it, and exit normally. On the Finish step, confirm
-   gameplay worked, choose **Shortcuts** (**Application menu** is selected by
-   default; **Desktop** is optional), then select **Save game**.
+6. Test the game, play it, and exit normally. On the Finish step, choose
+   **Shortcuts** (**Application menu** is selected by default; **Desktop** is
+   optional), then answer **Did the game work?** with **It works — save game**,
+   or **Not yet — test again** to return to testing.
 
 After saving, the same **Shortcuts** checkboxes (in **Setup & details**, on
 the Finish step) add or remove the menu and desktop shortcuts immediately,
 without another test. Removing shortcuts does not remove the game.
+
+**Store web installers:** Winebundle needs a game's offline installer.
+If the chosen file is a GOG Galaxy web installer (such as
+`GOG_Galaxy_<Game>.exe`) or a store app installer (Steam, Epic Games, EA app,
+Ubisoft Connect, Battle.net), step 1 explains why it's unlikely to work and
+how to get the offline installer (from GOG, the backup `setup_*.exe` download).
+GOG Galaxy installers are recognized by name or by the product name inside the
+file. To try the file anyway, tick **Use this file anyway**.
+
+**Removing a game:** in **Setup & details** (or **Continue setup**), select
+**Remove game...** and confirm. This deletes the game's setup folder: its Wine
+environment (with a game installed into it, and any saves or settings stored
+there), launcher, and menu and desktop shortcuts. Any Wine processes still
+using it are stopped first. The installer file, or an installed game's own
+folder, is kept. It isn't available while that game's installer or test is
+running.
 
 The library shows each game's setup status. Search by name, use **Continue
 setup** to resume an unfinished installation, or **Play** to launch a saved
@@ -266,21 +316,94 @@ or gameplay validation is inferred from a successful process exit.
 
 Only one local operation runs at a time in a GUI server. Stop terminates
 only that setup's process group and Wine prefix; unsaved progress can be lost.
-Keep the GUI server running until the operation finishes, and do not run
-multiple GUI servers against the same local setups. Use a new setup to try a
+Keep the app (or GUI server) running until an install or test finishes, and do
+not run multiple GUI servers against the same local setups. Use a new setup to try a
 different runner or compatibility settings; there is no automatic migration
 or retry matrix. The prototype has no winetricks/dependency editor.
 
+## Desktop app
+
+Winebundle runs as a desktop app with its own window.
+
+### Install as a package (Debian and Ubuntu)
+
+Build the `.deb` from the repository root, then install it with `apt`, which
+also installs the Python and WebKitGTK packages the window needs, plus Wine
+and winetricks:
+
+```bash
+make deb
+sudo apt install ./dist/winebundle_0.1.0_all.deb
+```
+
+The package puts the app in `/usr/share/winebundle`, the `winebundle` command
+in `/usr/bin`, and **Winebundle** in the application menu, so
+`make install-menu-entry` isn't needed. If you added a menu entry from a
+checkout before, run `make remove-menu-entry` so the menu opens the
+installed copy. Wine's 32-bit support (`wine32:i386`) needs the i386
+architecture enabled, so **System check** gives those commands if needed.
+Remove the package with `sudo apt remove winebundle`. Saved games, their
+shortcuts and preferences, kept under your home folder, aren't affected by
+installing, upgrading or removing it.
+
+The version comes from the `VERSION` file. `packaging/build-deb.sh [folder]`
+builds into another folder; it needs only `dpkg-deb` and `python3`.
+
+### Run from a checkout
+
+Start it from the repository root:
+
+```bash
+bin/winebundle
+```
+
+To add **Winebundle** to the application menu (and dock search), run once:
+
+```bash
+make install-menu-entry
+```
+
+This writes `io.github.jacobm36.Winebundle.desktop` to
+`~/.local/share/applications` and its icon to
+`~/.local/share/icons/hicolor/scalable/apps`, pointing at this checkout's
+`bin/winebundle`. Run it again if you move the repository, and use
+`make remove-menu-entry` to remove it. Saved games and their shortcuts are
+not affected.
+
+- **One window:** opening Winebundle again (from the menu or a terminal)
+  brings the existing window forward instead of starting a second copy.
+- **Closing:** closing the window or pressing `Ctrl+Q` quits immediately when
+  nothing is running. Games started with **Play** keep running. If an install
+  or test is still running, Winebundle asks first, because closing loses that
+  step's result (the installer or game itself keeps running).
+- **Requirements:** the window uses WebKitGTK through PyGObject (on
+  Debian/Ubuntu, `python3-gi` and `gir1.2-webkit-6.0`; WebKitGTK 4.1 also
+  works). Without them, Winebundle opens in your web browser instead, and
+  **System check** shows the install command under **App window**. Use
+  `bin/winebundle --browser` to choose the browser deliberately.
+- **WebKit sandbox:** Ubuntu 24.04 restricts the unprivileged user namespaces
+  WebKit's sandbox needs (`kernel.apparmor_restrict_unprivileged_userns=1`)
+  unless a `bwrap-userns-restrict` AppArmor profile is installed. On such
+  systems only, Winebundle starts WebKit with its sandbox disabled. The window
+  loads nothing but Winebundle's own loopback page, under a strict content
+  security policy; any other link opens in your web browser.
+
+The app runs the same local server as the web GUI, in-process, on a random
+loopback port. Preferences such as the first-run flag and the last folder used
+by each **Browse...** field are stored in
+`~/.local/share/winebundle/local/preferences.json`, so they survive restarts
+and are shared with the web GUI.
+
 ## Local web GUI
 
-Start the dependency-free local GUI from the repository root:
+The same interface also runs in a normal web browser. Start the
+dependency-free local GUI from the repository root:
 
 ```bash
 python3 gui/winebundle_gui.py
 ```
 
-The GUI opens the game library in your browser. This milestone does not yet
-provide an installable desktop application or dedicated window.
+The GUI opens the game library in your browser.
 
 **Browse...** opens an in-app file browser served by the local GUI. Browser
 file inputs cannot reveal a file's real path, which the launcher needs, so
@@ -289,8 +412,10 @@ filters them to the relevant file types. It starts from common places such
 as Home, Downloads, Games, and mounted drives, and remembers the last folder
 used for each field.
 
-Open **Advanced: VM bundle builder** to access installer, entrypoint,
-dependency, validation, and VM fields. The builder can:
+This developer server also serves the VM bundle builder at `/builder`
+(linked as **VM bundle builder (developer tool)** below the game library;
+the desktop app and `bin/winebundle --browser` don't include it). It has
+installer, entrypoint, dependency, validation, and VM fields, and can:
 
 - validate and launch a build;
 - show build output and completion status;
@@ -302,10 +427,16 @@ path, so installer and script inputs are server-side path fields; configuration
 import itself uses a normal browser file picker and is processed locally.
 
 The server listens only on `127.0.0.1` by default, accepts API requests only
-from loopback clients, and requires a per-process session token for
-state-changing requests. It launches the orchestrator with an argument array
-rather than a shell command. Stop it with `Ctrl+C`. To start without opening a
-browser, or to select another local port:
+from loopback clients addressed as `127.0.0.1`, `localhost`, or `[::1]` (which
+blocks DNS-rebinding pages), and requires a per-process session token for
+every request except the page assets. The server never gives that token to an
+unauthenticated request: the page opens with a one-time launch code after `#`
+in its address (never sent to the server as part of the URL), trades it for
+the token, and keeps the token for that tab only. A copied link therefore works
+once; if a page loses its connection, open Winebundle again. It launches the
+orchestrator with an argument array rather than a shell command. Stop it with
+`Ctrl+C`. To start without opening a browser, or to select another local port
+(open the printed link yourself):
 
 ```bash
 python3 gui/winebundle_gui.py --no-browser --port 9000
@@ -590,6 +721,11 @@ behind.
 bin/winebundle-vm
   -> lib/winebundle_config.py
   -> gui/winebundle_gui.py (optional local interface)
+
+bin/winebundle
+  -> gui/winebundle_app.py (desktop window, WebKitGTK)
+      -> gui/winebundle_gui.py server (in-process, random loopback port)
+          -> lib/local_setup.py, lib/system_check.py
   -> lib/backends/multipass.sh
       -> disposable Ubuntu VM
           -> guest/run-job.sh
@@ -633,3 +769,7 @@ make test
 ```
 
 The test target also runs the Python configuration and GUI API tests.
+
+## License
+
+Winebundle is released under the [MIT License](LICENSE).

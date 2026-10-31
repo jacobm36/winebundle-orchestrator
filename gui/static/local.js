@@ -4,7 +4,9 @@ const lines = text => text.split(/\r?\n/).filter(line => line.trim());
 let token = "", current = "", state = null, setups = [], step = 1;
 let pending = false, timer = null, revision = 0, connected = false;
 let librarySignature = "", defaults = {runner: "", places: []};
-let runnerTimer = null, runnerRevision = 0, system = null;
+let runnerTimer = null, runnerRevision = 0, runnerProblem = "", system = null, systemLoading = false;
+let sourceTimer = null, sourceRevision = 0, sourceWarning = null, suggestedName = "";
+let preferences = {systemChecked: false, pickerFolders: {}};
 const picker = {options: null, path: "", selected: "", revision: 0};
 
 // The prefix's drive_c is shown as C:\ so internal setup folder names stay out of the way.
@@ -21,11 +23,14 @@ function toLinux(text, drive = state && state.drive) {
 }
 const entrypointPath = () => toLinux(el("entrypoint").value);
 const parentOf = path => path && path.startsWith("/") ? path.replace(/\/[^/]*$/, "") || "/" : "";
-function remembered(kind) {
-  try { return localStorage.getItem(`winebundle.picker.${kind}`) || ""; } catch { return ""; }
+// Preferences live on the server so they survive the desktop app's per-launch port.
+const remembered = kind => preferences.pickerFolders[kind] || "";
+function savePreferences(values) {
+  api("/api/preferences", values).then(saved => { preferences = saved; }).catch(() => {});
 }
 function remember(kind, folder) {
-  try { localStorage.setItem(`winebundle.picker.${kind}`, folder); } catch { /* storage disabled */ }
+  preferences.pickerFolders[kind] = folder;
+  savePreferences({pickerFolders: {[kind]: folder}});
 }
 const place = label => (defaults.places.find(item => item.label === label) || {}).path || "";
 
@@ -39,20 +44,39 @@ async function api(path, body) {
   if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
   return data;
 }
+// The window opens with a one-time launch code; the token it buys is kept for this tab only.
+async function connect() {
+  const launch = /^#launch=([\w-]+)$/.exec(location.hash);
+  if (launch) history.replaceState(null, "", location.pathname + location.search);
+  const headers = launch ? {"X-Winebundle-Launch": launch[1]} :
+    {"X-Winebundle-Token": sessionStorage.getItem("winebundle-token") || ""};
+  const response = await fetch("/api/session", {headers});
+  const session = await response.json();
+  if (!response.ok && !launch) throw new Error("This page isn't connected to Winebundle. Open Winebundle again.");
+  if (!response.ok) throw new Error(session.error || `HTTP ${response.status}`);
+  sessionStorage.setItem("winebundle-token", session.token);
+  return session;
+}
 function message(text, failed = false) {
   el("result").textContent = text;
   el("result").classList.toggle("error", failed);
   el("result").setAttribute("role", failed ? "alert" : "status");
 }
 function error(exc) {
-  const help = current ? "Check the activity log or refresh status before retrying." :
-    el("workspace").hidden ? "Use Game library to refresh, or reload the page to reconnect." :
-    "Check the paths above and try again.";
+  const help = current ? "Check the activity log, then try again." :
+    el("workspace").hidden ? "Reload the page, or open Winebundle again." :
+    "Check the choices above and try again.";
   message(`${exc.message} ${help}`, true);
 }
 function busy() { return setups.some(setup => setup.status === "running"); }
 function showView(name) {
-  for (const view of ["library", "workspace", "system"]) el(view).hidden = view !== name;
+  el("remove-confirm").hidden = true;
+  for (const view of ["welcome", "library", "workspace", "system"]) el(view).hidden = view !== name;
+  const section = name === "system" ? "system-open" : name === "welcome" ? "" : "home";
+  for (const id of ["home", "system-open"]) {
+    if (id === section) el(id).setAttribute("aria-current", "page");
+    else el(id).removeAttribute("aria-current");
+  }
 }
 const SYSTEM_LABELS = {ok: "OK", warning: "Recommended", error: "Required", optional: "Optional", skipped: "Waiting"};
 function systemSummary(result) {
@@ -122,20 +146,70 @@ function renderSystem() {
   el("system-banner").classList.toggle("required", !system.ready);
   el("system-banner-text").textContent = summary;
 }
+function renderWelcomeCheck(failure = "") {
+  const badge = el("welcome-check-badge"), summary = el("welcome-check-summary");
+  badge.hidden = systemLoading || !system;
+  summary.classList.toggle("error", Boolean(failure) || Boolean(system && !system.ready));
+  el("welcome-check-again").disabled = systemLoading;
+  if (systemLoading) {
+    summary.textContent = "Checking this computer...";
+    el("welcome-check-problems").replaceChildren();
+    return;
+  }
+  if (!system) {
+    summary.textContent = `Couldn't check this computer${failure ? `: ${failure}` : ""}. Select Check again.`;
+    return;
+  }
+  badge.textContent = !system.ready ? "Action needed" : system.warnings ? "Ready, with tips" : "Ready";
+  badge.className = `welcome-badge ${!system.ready ? "status-error" : system.warnings ? "status-warning" : "status-ok"}`;
+  summary.textContent = system.warnings || !system.ready ?
+    `${systemSummary(system)} Each item below shows how to fix it.` : systemSummary(system);
+  el("welcome-check-problems").replaceChildren(...system.checks
+    .filter(check => check.status === "error" || check.status === "warning").map(systemCard));
+}
+function renderWelcomeActions() {
+  el("library-welcome").hidden = !connected || setups.length > 0;
+  const blocked = Boolean(system && !system.ready);
+  for (const id of ["welcome-installer", "welcome-existing"]) {
+    el(id).disabled = pending || !connected || busy() || systemLoading || blocked;
+  }
+  el("welcome-add-status").textContent = !connected || systemLoading ? "" :
+    blocked ? "Install what step 1 lists as required, then select Check again." :
+    busy() ? "Another game is installing or running. You can add a game when it finishes." : "";
+}
 async function loadSystem() {
   el("system-refresh").disabled = true;
   el("system-summary").classList.remove("error");
   el("system-summary").textContent = "Checking this computer...";
+  systemLoading = true;
+  renderWelcomeCheck();
+  renderWelcomeActions();
+  let failure = "";
   try {
     system = await api("/api/system");
     if (system.runner) defaults.runner = system.runner;
     renderSystem();
   } catch (exc) {
+    failure = exc.message;
     el("system-summary").classList.add("error");
     el("system-summary").textContent = `Couldn't check this computer: ${exc.message}`;
   } finally {
+    systemLoading = false;
     el("system-refresh").disabled = false;
+    renderWelcomeCheck(failure);
+    renderWelcomeActions();
+    showRunner();
   }
+}
+function showWelcome() {
+  ++revision;
+  current = "";
+  state = null;
+  showView("welcome");
+  message("");
+  el("welcome-title").focus();
+  refresh().catch(error);
+  return loadSystem();
 }
 function showSystem() {
   ++revision;
@@ -177,6 +251,7 @@ function showStep(value, focus = false) {
   if (focus) el("setup-title").focus();
 }
 function library() {
+  renderWelcomeActions();
   const query = el("search").value.trim().toLocaleLowerCase();
   const signature = JSON.stringify([setups, query, pending, connected]);
   if (signature === librarySignature) return;
@@ -186,11 +261,14 @@ function library() {
   const visible = setups.filter(setup => setup.name.toLocaleLowerCase().includes(query))
     .sort((a, b) => a.name.localeCompare(b.name));
   el("games").replaceChildren();
-  el("library-status").textContent = !connected ? "Library unavailable. Reload to reconnect." :
-    !setups.length ? "No games yet. Add your first game to get started." :
+  el("library-status").textContent = !connected ? "Can't reach Winebundle. Reload the page, or open Winebundle again." :
+    !setups.length ? "No games yet. Choose an option above to add your first one." :
     !visible.length ? "No games match your search." :
-    `${setups.length} saved game${setups.length === 1 ? "" : "s"}${busy() ? " - an operation is running" : ""}`;
-  el("add-game").disabled = pending || !connected || busy();
+    `${setups.length} game${setups.length === 1 ? "" : "s"}${busy() ? " - a game or installer is running" : ""}`;
+  el("search-field").hidden = !setups.length;
+  for (const id of ["add-installer", "add-existing"]) el(id).disabled = pending || !connected || busy();
+  el("add-status").textContent = connected && busy() ?
+    "Another game is installing or running. You can add a game when it finishes." : "";
   for (const setup of visible) {
     const card = document.createElement("article");
     card.className = "game-card";
@@ -247,13 +325,12 @@ function render() {
   el("summary").textContent = config ? `${statusText({...config, ...state})}${state.error ? `: ${state.error}` : ""}` : "";
   el("prepare").disabled = pending || !connected || busy() || !config || config.prepared;
   el("test").disabled = pending || !connected || busy() || !config || !config.prepared || !el("entrypoint").value.trim();
-  el("save").disabled = pending || !connected || busy() || !tested() || !el("accepted").checked || Boolean(config && config.accepted);
+  el("save").disabled = pending || !connected || busy() || !tested() || Boolean(config && config.accepted);
   el("stop").disabled = pending || !connected || !running;
   el("operation-controls").hidden = !running;
   el("play").hidden = !config || !config.accepted;
   el("play").disabled = pending || !connected || busy();
   el("save").hidden = Boolean(config && config.accepted);
-  el("acceptance").hidden = Boolean(config && config.accepted);
   el("to-test").hidden = !config || !config.prepared;
   el("to-test").disabled = pending || Boolean(running);
   el("to-finish").hidden = !tested();
@@ -262,7 +339,9 @@ function render() {
   el("finish-title").textContent = config && config.accepted ? "Your game is ready" : "Did the game work?";
   el("finish-help").textContent = config && config.accepted ?
     `Play from your library${shortcutText(state.shortcuts)}. Shortcuts work without this app; change them below.` :
-    "Confirm gameplay worked to add Play to your library and create the shortcuts you choose.";
+    tested() ? "If you played it and it works, save it to your library with the shortcuts you choose." :
+    "Test the game first, then come back here to save it.";
+  el("retest").textContent = config && config.accepted ? "Test again" : "Not yet — test again";
   const desktopFolder = Boolean(state && state.shortcuts && state.shortcuts.desktopFolder);
   el("shortcut-menu").disabled = pending || !connected || !config;
   el("shortcut-desktop").disabled = pending || !connected || !config || !desktopFolder;
@@ -273,10 +352,15 @@ function render() {
   }
   technical();
   el("install-help").textContent = config && config.mode === "existing" ?
-    "Prepare a separate Wine environment. Your existing game folder is not copied or imported." :
-    "Start preparation, then complete the installer on your desktop. Close the installer and any game it opens. The next step appears when they exit.";
-  el("prepare").textContent = config && config.mode === "existing" ? "Prepare Wine environment" : "Prepare and open installer";
-  el("setup").querySelector("button[type=submit]").disabled = pending || !connected || busy();
+    "Winebundle sets up Wine for this game. Your game folder stays where it is." :
+    "The installer opens on your desktop. Finish it, then close it and any game it starts. The next step appears when they exit.";
+  el("prepare").textContent = config && config.mode === "existing" ? "Set up Wine for this game" : "Open the installer";
+  el("setup").querySelector("button[type=submit]").disabled = pending || !connected || busy() ||
+    Boolean(sourceWarning && !el("source-anyway").checked);
+  el("remove-open").hidden = !config;
+  el("remove-open").disabled = pending || !connected || Boolean(running);
+  if (running) el("remove-confirm").hidden = true;
+  el("remove-yes").disabled = pending || !connected || Boolean(running);
   showStep(step);
 }
 function shortcutText(shortcuts) {
@@ -313,7 +397,6 @@ function details(fill) {
   if (fill) {
     el("entrypoint").value = toWindows(config.entrypoint);
     el("args").value = config.args.join("\n");
-    el("accepted").checked = false;
     el("shortcut-menu").checked = true;
     el("shortcut-desktop").checked = false;
     el("shortcut-status").textContent = "";
@@ -357,14 +440,14 @@ async function refresh(fill = false, completedAction = "") {
         (previous.status === "running" || previous.status !== state.status ||
          previous.action !== state.action || state.action === completedAction)) {
       if (state.status === "failed") {
-        message(`Operation failed: ${state.error}. Open the activity log for details.`, true);
+        message(`Something went wrong: ${state.error}. The activity log below has details.`, true);
         el("activity").open = true;
       } else if (state.action === "prepare") {
         step = 3;
-        message("Preparation finished. Check the game executable and test gameplay.");
+        message("Ready to test. Check the game's .exe, then select Test game.");
       } else if (state.action === "test") {
         step = 4;
-        message("The game exited. Confirm gameplay worked before saving.");
+        message("The game exited. If it worked, save it on the Finish step.");
       } else {
         message("The game exited. Ready to play again.");
       }
@@ -399,7 +482,7 @@ async function perform(action, body = {}) {
     await api(`/api/local/${current}/${action}`, body);
     if (action === "save") message(`Saved. Play from your library${shortcutText({
       menu: body.menu, desktop: body.desktop})}.`);
-    else if (action === "stop") message("Stop requested. Waiting for Wine processes to exit.");
+    else if (action === "stop") message("Stopping. This can take a few seconds.");
     else message(action === "prepare" ?
       "Preparing. Watch for installer windows on your desktop; finish and close them to continue." :
       "Game started. Exit normally when you're finished.");
@@ -427,57 +510,137 @@ function home() {
   showView("library");
   message("");
   refresh().catch(error);
-  el("search").focus();
+  el("add-title").focus();
 }
-for (const id of ["home", "back-library", "system-back"]) el(id).addEventListener("click", home);
+for (const id of ["home", "back-library", "system-back", "welcome-skip"]) el(id).addEventListener("click", home);
+el("library-welcome").addEventListener("click", showWelcome);
+el("welcome-check-again").addEventListener("click", loadSystem);
+el("welcome-check-details").addEventListener("click", showSystem);
 for (const id of ["system-open", "system-banner-open"]) el(id).addEventListener("click", showSystem);
 el("system-refresh").addEventListener("click", loadSystem);
 el("search").addEventListener("input", library);
-el("add-game").addEventListener("click", () => {
+function addGame(mode = "installer") {
   ++revision;
   current = "";
   state = null;
   el("setup").reset();
+  suggestedName = "";
+  el("options").open = false;
+  runnerProblem = "";
+  setMode(mode);
   el("runner").value = defaults.runner;
-  el("setup").elements.mode.dispatchEvent(new Event("change"));
   checkRunner();
+  checkSource();
   showView("workspace");
   el("activity").hidden = true;
   message("");
   step = 1;
   render();
   el("setup").elements.name.focus();
-});
-el("setup").elements.mode.addEventListener("change", event => {
-  const existing = event.target.value === "existing";
+}
+el("add-installer").addEventListener("click", () => addGame("installer"));
+el("add-existing").addEventListener("click", () => addGame("existing"));
+el("welcome-installer").addEventListener("click", () => addGame("installer"));
+el("welcome-existing").addEventListener("click", () => addGame("existing"));
+// The home screen already asked what kind of file this is, so step 1 only offers a switch.
+function setMode(mode) {
+  const existing = mode === "existing";
+  el("setup").elements.mode.value = mode;
+  el("choose-title").textContent = existing ? "Choose the installed game" : "Choose the installer";
+  el("choose-help").textContent = existing ?
+    "Pick the game's own .exe. Its files stay where they are, so back up your saves first." :
+    "Pick the game's offline installer, such as GOG's setup_<game>.exe.";
+  el("mode-switch").textContent = existing ? "I have an installer instead" : "The game is already installed";
   el("source-label").textContent = existing ? "Installed game file (.exe)" : "Installer file";
   el("source").placeholder = existing ? "Choose the game's .exe" : "Choose an .exe or .msi installer";
   document.querySelector("[data-browse=source]").setAttribute("aria-label",
     existing ? "Browse for installed game file" : "Browse for installer file");
+}
+el("mode-switch").addEventListener("click", () => {
+  setMode(el("setup").elements.mode.value === "existing" ? "installer" : "existing");
+  checkSource();
 });
+function showRunner() {
+  const value = el("runner").value.trim(), problem = runnerProblem;
+  const known = system && system.runner === value && system.runnerVersion;
+  el("runner-summary").classList.toggle("error", Boolean(problem));
+  el("runner-summary-text").textContent = problem ||
+    (known ? `Using ${system.runnerVersion.split(" ")[0].replace(/^wine-/, "Wine ")}.` : `Using Wine at ${value}.`);
+  el("runner-change").textContent = problem ? "Choose Wine" : "Change";
+  if (problem) el("options").open = true;
+}
 async function checkRunner() {
   clearTimeout(runnerTimer);
-  const version = ++runnerRevision, value = el("runner").value;
+  const version = ++runnerRevision, value = el("runner").value.trim();
   const status = el("runner-status");
+  let problem = "";
   if (!value) {
-    status.classList.toggle("error", !defaults.runner);
-    status.textContent = defaults.runner ? "" :
-      "Wine wasn't found. Open System check for install steps, or browse to a Wine executable.";
-    return;
+    problem = defaults.runner ? `Choose a Wine executable, such as ${defaults.runner}.` :
+      "Wine wasn't found. Open System check for install steps, or choose a Wine executable.";
+  } else {
+    try {
+      problem = (await api(`/api/runner?path=${encodeURIComponent(value)}`)).error;
+    } catch (exc) {
+      problem = "";
+    }
   }
-  try {
-    const result = await api(`/api/runner?path=${encodeURIComponent(value)}`);
-    if (version !== runnerRevision) return;
-    status.classList.toggle("error", Boolean(result.error));
-    status.textContent = result.error || "Wine found, with its matching wineserver.";
-  } catch (exc) {
-    if (version === runnerRevision) status.textContent = "";
-  }
+  if (version !== runnerRevision) return;
+  runnerProblem = problem;
+  status.classList.toggle("error", Boolean(problem));
+  status.textContent = problem || (value ? "Wine found." : "");
+  showRunner();
 }
+el("runner-change").addEventListener("click", () => {
+  el("options").open = true;
+  el("runner").focus();
+});
+// A required field inside closed options can't be focused, so open them first.
+el("runner").addEventListener("invalid", () => { el("options").open = true; });
 el("runner").addEventListener("input", () => {
   clearTimeout(runnerTimer);
   runnerTimer = setTimeout(checkRunner, 350);
 });
+function showSourceWarning(warning) {
+  const changed = JSON.stringify(warning) !== JSON.stringify(sourceWarning);
+  sourceWarning = warning;
+  el("source-warning").hidden = !warning;
+  if (changed) el("source-anyway").checked = false;
+  if (warning) {
+    el("source-warning-text").textContent = warning.message;
+    el("source-warning-advice").textContent = warning.advice;
+  }
+  render();
+}
+function inspectSource(path, mode) {
+  return api(`/api/installer-check?path=${encodeURIComponent(path)}&mode=${mode}`);
+}
+// Fill in the game name from the file, unless the user has typed their own.
+function suggestName(name) {
+  const field = el("setup").elements.name;
+  if (!name || (field.value.trim() && field.value !== suggestedName)) return;
+  field.value = suggestedName = name;
+}
+async function checkSource() {
+  clearTimeout(sourceTimer);
+  const version = ++sourceRevision, value = el("source").value.trim();
+  if (!value.startsWith("/")) {
+    showSourceWarning(null);
+    return;
+  }
+  try {
+    const result = await inspectSource(value, el("setup").elements.mode.value);
+    if (version !== sourceRevision) return;
+    suggestName(result.name);
+    showSourceWarning(result.warning);
+  } catch (exc) {
+    if (version === sourceRevision) showSourceWarning(null);
+  }
+}
+el("source").addEventListener("input", () => {
+  clearTimeout(sourceTimer);
+  sourceTimer = setTimeout(checkSource, 350);
+});
+el("source-anyway").addEventListener("change", render);
 
 const pickerFields = {
   source: () => {
@@ -636,6 +799,7 @@ el("setup").addEventListener("submit", async event => {
   try {
     const values = Object.fromEntries(new FormData(event.target));
     values.installArgs = lines(values.installArgs);
+    values.allowWebInstaller = Boolean(sourceWarning) && el("source-anyway").checked;
     const created = await api("/api/local", values);
     await openSetup(created.id);
     message("Setup saved. Prepare your game next; you can return to it later from the library.");
@@ -649,23 +813,17 @@ for (const [id, value] of [["to-test", 3], ["to-finish", 4], ["retest", 3]]) {
 }
 el("candidates").addEventListener("change", () => {
   if (el("candidates").value) el("entrypoint").value = toWindows(el("candidates").value);
-  el("accepted").checked = false;
   render();
 });
-for (const id of ["entrypoint", "args"]) el(id).addEventListener("input", () => {
-  el("accepted").checked = false;
-  render();
-});
-el("accepted").addEventListener("change", render);
+for (const id of ["entrypoint", "args"]) el(id).addEventListener("input", render);
 el("prepare").addEventListener("click", () => perform("prepare"));
 el("test").addEventListener("click", () => {
-  el("accepted").checked = false;
   perform("test", {entrypoint: entrypointPath(), args: lines(el("args").value)});
 });
 el("stop").addEventListener("click", () => {
-  if (confirm("Stop this game's Wine processes? Unsaved progress may be lost.")) perform("stop");
+  if (confirm("Stop the game or installer now? Unsaved progress may be lost.")) perform("stop");
 });
-el("save").addEventListener("click", () => perform("save", {accepted: el("accepted").checked,
+el("save").addEventListener("click", () => perform("save", {accepted: true,
   menu: el("shortcut-menu").checked, desktop: el("shortcut-desktop").checked}));
 async function updateShortcuts() {
   if (!state || !state.config.accepted) return;
@@ -693,23 +851,120 @@ async function updateShortcuts() {
 el("shortcut-menu").addEventListener("change", updateShortcuts);
 el("shortcut-desktop").addEventListener("change", updateShortcuts);
 el("play").addEventListener("click", () => perform("play"));
+el("remove-open").addEventListener("click", () => {
+  if (!state) return;
+  const config = state.config, existing = config.mode === "existing";
+  el("remove-title").textContent = `Remove ${config.name}?`;
+  el("remove-text").textContent = !config.prepared && !existing ?
+    "Nothing has been installed yet. This removes the unfinished setup." :
+    `This deletes ${config.name}'s Wine environment${existing ? "" : ", including the installed game"}, ` +
+    "any saves or settings stored in it, and its launcher and shortcuts. This can't be undone.";
+  el("remove-kept").textContent = existing ?
+    `Your game folder is kept: ${parentOf(config.source)}` : `The installer file is kept: ${config.source}`;
+  el("remove-confirm").hidden = false;
+  el("remove-title").focus();
+});
+el("remove-no").addEventListener("click", () => {
+  el("remove-confirm").hidden = true;
+  el("remove-open").focus();
+});
+el("remove-yes").addEventListener("click", async () => {
+  pending = true;
+  clearTimeout(timer);
+  ++revision;
+  render();
+  try {
+    const result = await api(`/api/local/${current}/remove`, {});
+    pending = false;
+    home();
+    message(`Removed ${result.name}.`);
+  } catch (exc) {
+    error(exc);
+  } finally {
+    pending = false;
+    render();
+  }
+});
 el("retry-refresh").addEventListener("click", () => refresh().catch(error));
+
+// Dropping a file: the desktop app passes real paths in from GTK; browsers may offer file:// URIs.
+async function dropFiles(paths) {
+  showDropZone(false);
+  const file = paths.find(path => /\.(exe|msi)$/i.test(path));
+  if (el("picker").open) return;
+  if (!file) {
+    message(paths.length ? "Winebundle needs a Windows game: drop a setup .exe or .msi, or the game's .exe." :
+      "Couldn't tell where that file is. Use Browse... to choose it instead.", true);
+    return;
+  }
+  const welcome = !el("welcome").hidden;
+  if (pending || el(welcome ? "welcome-installer" : "add-installer").disabled) {
+    message(el(welcome ? "welcome-add-status" : "add-status").textContent ||
+      "Winebundle can't add a game right now. Try again in a moment.", true);
+    return;
+  }
+  if (!el("workspace").hidden && current) {
+    if (step === 3 && /\.exe$/i.test(file)) {
+      el("entrypoint").value = toWindows(file);
+      render();
+      message(`Selected ${file.split("/").pop()} as the game to test.`);
+    } else {
+      message("Finish this game's setup first, or go back to the library to add another game.", true);
+    }
+    return;
+  }
+  let kind = /\.msi$/i.test(file) ? "installer" : null;
+  try {
+    kind = kind || (await inspectSource(file, "installer")).kind;
+  } catch (exc) { /* The file is checked again when the setup is created. */ }
+  const inStep1 = !el("workspace").hidden;
+  const mode = kind === "installer" ? "installer" :
+    inStep1 ? el("setup").elements.mode.value : "existing";
+  if (inStep1) setMode(mode);
+  else addGame(mode);
+  el("source").value = file;
+  message("File added. Check the game name, then continue.");
+  await checkSource();
+  el("setup").elements.name.focus();
+}
+function showDropZone(visible) { el("drop-zone").hidden = !visible; }
+window.winebundleDrop = {hover: showDropZone, files: dropFiles};
+const dragsFiles = event => Array.from(event.dataTransfer.types).includes("Files");
+document.addEventListener("dragover", event => {
+  if (!dragsFiles(event)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+  showDropZone(true);
+});
+document.addEventListener("dragleave", event => {
+  if (!event.relatedTarget) showDropZone(false);
+});
+document.addEventListener("drop", event => {
+  if (!dragsFiles(event)) return;
+  event.preventDefault();
+  const paths = event.dataTransfer.getData("text/uri-list").split(/\r?\n/)
+    .filter(uri => uri.startsWith("file:///"))
+    .map(uri => decodeURIComponent(new URL(uri).pathname));
+  dropFiles(paths);
+});
 (async () => {
   try {
-    const session = await api("/api/session");
+    const session = await connect();
     token = session.token;
     defaults = session.local || defaults;
-    await Promise.all([refresh(), loadSystem()]);
-    let seen = true;
-    try {
-      seen = localStorage.getItem("winebundle.systemChecked") === "1";
-      localStorage.setItem("winebundle.systemChecked", "1");
-    } catch { /* storage disabled */ }
-    // Show the check on first run, and whenever required software is missing.
-    if (!current && el("workspace").hidden && (!seen || (system && !system.ready))) showView("system");
+    el("builder-link").hidden = !session.builder;
+    const [saved] = await Promise.all([api("/api/preferences"), refresh(), loadSystem()]);
+    preferences = saved;
+    const firstRun = !preferences.systemChecked;
+    if (firstRun) savePreferences({systemChecked: true});
+    // New users get the guide until their first game is added; others see what's missing.
+    if (!current && el("workspace").hidden) {
+      if (firstRun || !setups.length) showView("welcome");
+      else if (system && !system.ready) showView("system");
+    }
   } catch (exc) {
     connected = false;
     render();
-    error(exc);
+    message(exc.message, true);
   }
 })();

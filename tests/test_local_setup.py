@@ -452,5 +452,136 @@ class LocalSetupTests(unittest.TestCase):
             self.assertEqual(local_setup.default_runner(), "")
 
 
+    def test_web_installers_are_recognized_and_need_confirmation(self):
+        galaxy = self.base / "GOG_Galaxy_Some_Game.exe"
+        galaxy.write_bytes(b"MZ")
+        renamed = self.base / "download.exe"
+        renamed.write_bytes(b"MZ" + "GOG Galaxy - Game Installer.exe".encode("utf-16-le"))
+        steam = self.base / "SteamSetup.exe"
+        steam.write_bytes(b"MZ")
+        offline = self.base / "setup_some_game_1.0_(123).exe"
+        offline.write_bytes(b"MZ GOG Galaxy offline")
+        self.assertEqual(local_setup.web_installer(galaxy)["store"], "GOG Galaxy")
+        self.assertEqual(local_setup.web_installer(renamed)["store"], "GOG Galaxy")
+        self.assertIn("setup_", local_setup.web_installer(renamed)["advice"])
+        self.assertEqual(local_setup.web_installer(steam)["store"], "Steam")
+        self.assertIsNone(local_setup.web_installer(offline))
+        self.assertIsNone(local_setup.web_installer(self.base / "missing.exe"))
+        with self.assertRaisesRegex(ConfigError, "GOG Galaxy web installer"):
+            self.create(mode="installer", source=str(galaxy))
+        self.assertEqual(self.store.list(), [])
+        game_id = self.create(mode="installer", source=str(galaxy), allowWebInstaller=True)
+        self.assertEqual(self.store.get(game_id)["config"]["source"], str(galaxy))
+
+    def test_remove_deletes_setup_and_shortcuts_but_keeps_game_files(self):
+        game_id = self.saved_game()
+        other = self.create(name="Other game")
+        directory = self.store._directory(game_id)
+        config = self.store.get(game_id)["config"]
+        menu = Path(config["desktop"])
+        self.assertTrue(menu.is_file())
+        unrelated = menu.parent / "someone-else.desktop"
+        unrelated.write_text("[Desktop Entry]\n")
+        locked = directory / "prefix/drive_c/locked"
+        (locked / "inner").mkdir(parents=True)
+        (locked / "inner/save.dat").write_text("save")
+        (locked / "inner").chmod(0o500)
+        locked.chmod(0o500)
+        outside = self.base / "outside"
+        outside.mkdir()
+        (outside / "keep.txt").write_text("keep")
+        (directory / "prefix/drive_c/link").symlink_to(outside)
+        result = self.store.remove(game_id)
+        self.assertEqual(result, {"removed": game_id, "name": "My game", "kept": str(self.game)})
+        self.assertFalse(directory.exists())
+        self.assertFalse(menu.exists())
+        self.assertTrue(unrelated.is_file())
+        self.assertTrue(self.game.is_file())
+        self.assertEqual((outside / "keep.txt").read_text(), "keep")
+        self.assertEqual([setup["id"] for setup in self.store.list()], [other])
+        with self.assertRaisesRegex(ConfigError, "no longer in the library"):
+            self.store.remove(game_id)
+        with self.assertRaises(ConfigError):
+            self.store.remove("../setups")
+
+    def test_remove_waits_for_running_operation(self):
+        game_id = self.create()
+        self.prepare(game_id)
+        self.store.start(game_id, "test", {"entrypoint": str(self.game), "args": ["--wait"]})
+        with self.assertRaisesRegex(ConfigError, "stop this game"):
+            self.store.remove(game_id)
+        self.store.stop(game_id)
+        self.finish(game_id)
+        self.store.remove(game_id)
+        self.assertEqual(self.store.list(), [])
+
+
+class PreferenceTests(unittest.TestCase):
+    def test_preferences_are_validated_and_survive_bad_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            setup = LocalSetup(temporary)
+            self.assertEqual(setup.preferences(), {"systemChecked": False, "pickerFolders": {}})
+            for bad in ({"systemChecked": "yes"}, {"pickerFolders": {"home": "/x"}},
+                        {"pickerFolders": {"exe": "relative"}}, {"pickerFolders": []},
+                        {"other": 1}, []):
+                with self.assertRaises(ConfigError, msg=bad):
+                    setup.set_preferences(bad)
+            setup.set_preferences({"pickerFolders": {"exe": "/games"}})
+            setup.set_preferences({"systemChecked": True, "pickerFolders": {"runner": "/usr/bin"}})
+            self.assertEqual(setup.preferences(), {
+                "systemChecked": True,
+                "pickerFolders": {"exe": "/games", "runner": "/usr/bin"}})
+            self.assertEqual(setup.list(), [])
+            (Path(temporary) / "preferences.json").write_text("[not json")
+            self.assertEqual(setup.preferences(), {"systemChecked": False, "pickerFolders": {}})
+            self.assertIsNone(setup.busy())
+
+
+class SuggestNameTests(unittest.TestCase):
+    def test_installer_names(self):
+        downloads = str(Path.home() / "Downloads")
+        for file_name, expected in (
+                ("setup_blasphemous_4.0.67.1_fixdlc_(64bit)_(85598).exe", "Blasphemous"),
+                ("setup_yet_another_zombie_survivors_1.2.0_(64bit)_(77432).exe",
+                 "Yet Another Zombie Survivors"),
+                ("setup_heroes_of_might_and_magic_3_complete_4.0_(28740).exe",
+                 "Heroes of Might and Magic 3 Complete"),
+                ("setup_metro_2033_redux_1.0.0.3_(12345).exe", "Metro 2033 Redux"),
+                ("setup_final_fantasy_vii_1.0.exe", "Final Fantasy VII"),
+                ("HollowKnightSetup.exe", "Hollow Knight"),
+                ("Celeste_Installer.msi", "Celeste"),
+                ("Half-Life_v1.1.exe", "Half-Life"),
+                ("setup.exe", "")):
+            with self.subTest(file_name):
+                self.assertEqual(local_setup.suggest_name(f"{downloads}/{file_name}"), expected)
+        self.assertEqual(local_setup.suggest_name(f"{downloads}/Doom 3/setup.exe"), "Doom 3")
+        self.assertEqual(local_setup.suggest_name("/media/disc/SETUP.EXE"), "")
+
+    def test_installed_game_names_prefer_the_game_folder(self):
+        games = Path.home() / "Games"
+        for path, expected in (
+                ("Blasphemous/Blasphemous.exe", "Blasphemous"),
+                ("hk/hollow_knight.exe", "Hollow Knight"),
+                ("The Witcher 3/bin/x64/witcher3.exe", "The Witcher 3"),
+                ("Some Game/Game/Binaries/Win64/Game-Win64-Shipping.exe", "Some Game"),
+                ("game.exe", "")):
+            with self.subTest(path):
+                self.assertEqual(local_setup.suggest_name(str(games / path), "existing"), expected)
+        self.assertEqual(local_setup.suggest_name("bad\0name.exe"), "")
+
+    def test_check_source_detects_installers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory, "Blasphemous")
+            folder.mkdir()
+            game = folder / "Blasphemous.exe"
+            game.write_bytes(b"MZ game")
+            packed = folder / "unpack.exe"
+            packed.write_bytes(b"MZ" + "Inno Setup".encode("utf-16-le"))
+            self.assertEqual(local_setup.check_source(str(game), "existing"),
+                             {"warning": None, "name": "Blasphemous", "kind": "exe"})
+            self.assertEqual(local_setup.check_source(str(packed))["kind"], "installer")
+            self.assertEqual(local_setup.check_source(str(folder))["kind"], None)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -3,37 +3,99 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Winebundle - Your games</title>
+  <title>Winebundle - Your Windows games</title>
   <link rel="stylesheet" href="/app.css">
   <script src="/local.js" defer></script>
 </head>
 <body class="local-setup">
-  <header>
-    <div>
-      <p class="eyebrow">Winebundle</p>
-      <h1>Your games</h1>
-      <p>Install once. Test it. Make it yours.</p>
-    </div>
-    <nav class="actions" aria-label="Main navigation">
-      <button id="home" class="secondary" type="button">Game library</button>
-      <button id="system-open" class="secondary" type="button">System check</button>
-      <a class="button secondary" href="/builder">Advanced: VM bundle builder</a>
+  <header class="app-bar">
+    <h1>Winebundle</h1>
+    <nav aria-label="Main navigation">
+      <button id="home" class="nav-link" type="button">Game library</button>
+      <button id="system-open" class="nav-link" type="button">System check</button>
     </nav>
   </header>
   <main>
     <p id="result" role="status" aria-live="polite"></p>
-    <div id="library">
+    <div id="welcome" hidden>
       <div class="section-heading">
-        <div><h2>Game library</h2><p class="muted">Your games and setups in progress, saved on this computer.</p></div>
-        <button id="add-game" type="button" disabled>Add game</button>
+        <div>
+          <p class="eyebrow">Getting started</p>
+          <h2 id="welcome-title" tabindex="-1">Welcome to Winebundle</h2>
+          <p class="muted">Play Windows games on Linux in three steps. Nothing is installed or changed until you choose to.</p>
+        </div>
+        <button id="welcome-skip" class="secondary" type="button">Skip to game library</button>
       </div>
+      <ol class="welcome-steps">
+        <li class="welcome-step">
+          <div class="welcome-step-heading">
+            <span class="welcome-number" aria-hidden="true">1</span>
+            <h3>Check this computer</h3>
+            <span id="welcome-check-badge" class="welcome-badge" hidden></span>
+          </div>
+          <p id="welcome-check-summary" role="status">Checking this computer...</p>
+          <ul id="welcome-check-problems" class="system-checks"></ul>
+          <div class="actions">
+            <button id="welcome-check-again" class="secondary" type="button">Check again</button>
+            <button id="welcome-check-details" class="secondary" type="button">See all checks</button>
+          </div>
+        </li>
+        <li class="welcome-step">
+          <div class="welcome-step-heading">
+            <span class="welcome-number" aria-hidden="true">2</span>
+            <h3 id="welcome-add-title">Add your first game</h3>
+          </div>
+          <p>What do you have?</p>
+          <div class="welcome-choices" role="group" aria-labelledby="welcome-add-title">
+            <button id="welcome-installer" class="welcome-choice" type="button" disabled>
+              <strong>A game installer</strong>
+              <span>A setup .exe or .msi file, for example from GOG or a game disc.</span>
+            </button>
+            <button id="welcome-existing" class="welcome-choice" type="button" disabled>
+              <strong>An installed game</strong>
+              <span>The game's own .exe, already copied to this computer.</span>
+            </button>
+          </div>
+          <p id="welcome-add-status" class="field-status error" role="status"></p>
+        </li>
+        <li class="welcome-step">
+          <div class="welcome-step-heading">
+            <span class="welcome-number" aria-hidden="true">3</span>
+            <h3>Test, save and play</h3>
+          </div>
+          <p class="muted">Winebundle installs the game in its own Wine environment, then asks you to try it.
+            Once you confirm it works, the game joins your library with an application menu shortcut, ready to play.</p>
+        </li>
+      </ol>
+    </div>
+    <div id="library">
+      <section class="add-hero" aria-labelledby="add-title">
+        <h2 id="add-title" tabindex="-1">Bring your Windows games to Linux</h2>
+        <div class="welcome-choices" role="group" aria-labelledby="add-title">
+          <button id="add-installer" class="welcome-choice" type="button" disabled>
+            <strong>A game installer</strong>
+            <span>A setup .exe or .msi file, for example from GOG or a game disc.</span>
+          </button>
+          <button id="add-existing" class="welcome-choice" type="button" disabled>
+            <strong>An installed game</strong>
+            <span>The game's own .exe, already copied to this computer.</span>
+          </button>
+        </div>
+        <p class="drop-hint">Or drag a game file onto this window.</p>
+        <p id="add-status" class="field-status" role="status"></p>
+      </section>
       <div id="system-banner" class="system-banner" hidden>
         <p id="system-banner-text"></p>
         <button id="system-banner-open" class="secondary" type="button">Open system check</button>
       </div>
-      <label class="search">Find a game<input id="search" type="search" placeholder="Search by name"></label>
+      <div class="section-heading library-heading">
+        <h2>Your Windows games</h2>
+      </div>
+      <label id="search-field" class="search">Find a game<input id="search" type="search" placeholder="Search by name"></label>
       <p id="library-status" role="status">Loading your library...</p>
+      <button id="library-welcome" class="secondary" type="button" hidden>Open the getting started guide</button>
       <div id="games" class="game-grid"></div>
+      <p id="builder-link" class="developer-link" hidden><a href="/builder">VM bundle builder (developer tool)</a></p>
     </div>
     <div id="system" hidden>
       <div class="section-heading">
@@ -54,7 +116,19 @@
     <div id="workspace" hidden>
       <div class="section-heading">
         <div><p class="eyebrow">Guided setup</p><h2 id="setup-title" tabindex="-1">Add a game</h2></div>
-        <button id="back-library" class="secondary" type="button">Back to library</button>
+        <div class="actions">
+          <button id="remove-open" class="secondary danger" type="button" hidden>Remove game...</button>
+          <button id="back-library" class="secondary" type="button">Back to library</button>
+        </div>
+      </div>
+      <div id="remove-confirm" class="remove-confirm" role="group" aria-labelledby="remove-title" hidden>
+        <h3 id="remove-title" tabindex="-1">Remove this game?</h3>
+        <p id="remove-text"></p>
+        <p id="remove-kept" class="muted"></p>
+        <div class="actions">
+          <button id="remove-yes" class="danger" type="button">Remove permanently</button>
+          <button id="remove-no" class="secondary" type="button">Cancel</button>
+        </div>
       </div>
       <nav class="setup-steps" aria-label="Setup progress">
         <button type="button" data-step="1">1. Choose game</button>
@@ -65,37 +139,41 @@
       <p id="summary" role="status"></p>
       <form id="setup" data-panel="1">
         <section>
-          <h2>Choose your game</h2>
-          <p>Use a trusted installer, or a game already installed on this computer.
-            Each game gets its own Wine environment (prefix). Existing game files
-            stay in place; back up your saves first.</p>
+          <h2 id="choose-title">Choose the installer</h2>
+          <p class="mode-line"><span id="choose-help"></span>
+            <button id="mode-switch" class="link-button" type="button"></button></p>
+          <input type="hidden" name="mode" value="installer">
           <div class="grid">
-            <label>Game name<input name="name" required autocomplete="off"></label>
-            <label>What are you adding?<select name="mode">
-              <option value="installer">EXE/MSI installer</option>
-              <option value="existing">Already installed game EXE</option>
-            </select></label>
+            <label class="wide">Game name<input name="name" required autocomplete="off"></label>
             <div class="wide field">
               <label for="source" id="source-label">Installer file</label>
               <div class="path-row">
                 <input id="source" name="source" required placeholder="Choose an .exe or .msi installer">
                 <button type="button" class="secondary" data-browse="source" aria-describedby="source-label">Browse...</button>
               </div>
-            </div>
-            <div class="wide field">
-              <label for="runner">Wine executable</label>
-              <div class="path-row">
-                <input id="runner" name="runner" required placeholder="/usr/bin/wine" aria-describedby="runner-status runner-help">
-                <button type="button" class="secondary" data-browse="runner" aria-label="Browse for Wine executable">Browse...</button>
+              <div id="source-warning" class="source-warning" role="alert" hidden>
+                <p><strong id="source-warning-title">This isn't a game installer</strong></p>
+                <p id="source-warning-text"></p>
+                <p id="source-warning-advice"></p>
+                <label class="check"><input id="source-anyway" type="checkbox"> Use this file anyway</label>
               </div>
-              <p id="runner-status" class="field-status" role="status"></p>
             </div>
           </div>
-          <p id="runner-help" class="muted">Most systems use /usr/bin/wine. To use another version, such as
-            Wine-GE, choose its bin/wine. Proton's wrapper isn't supported. No runners are downloaded.</p>
-          <details>
-            <summary>Compatibility and installer options</summary>
+          <p id="runner-summary" class="runner-summary" role="status"><span id="runner-summary-text"></span>
+            <button id="runner-change" class="link-button" type="button">Change</button></p>
+          <details id="options">
+            <summary>Wine and compatibility options</summary>
             <div class="grid advanced-fields">
+              <div class="wide field">
+                <label for="runner">Wine executable</label>
+                <div class="path-row">
+                  <input id="runner" name="runner" required placeholder="/usr/bin/wine" aria-describedby="runner-status runner-help">
+                  <button type="button" class="secondary" data-browse="runner" aria-label="Browse for Wine executable">Browse...</button>
+                </div>
+                <p id="runner-status" class="field-status"></p>
+                <p id="runner-help" class="muted">Most systems use /usr/bin/wine. For another version, such as
+                  Wine-GE, choose its bin/wine. Proton isn't supported.</p>
+              </div>
               <label>Architecture<select name="arch">
                 <option value="win64">64-bit</option><option value="win32">32-bit</option>
               </select></label>
@@ -110,21 +188,19 @@
               <label class="wide">Installer arguments (one per line; optional)<textarea name="installArgs" rows="2"></textarea></label>
             </div>
           </details>
-          <p class="muted">Local setup runs Windows software with your user permissions, not inside a sandbox or VM.
-            Keep the runner and game files at their chosen paths.</p>
+          <p class="muted">Only add games from sources you trust: they run with your normal permissions, not in a sandbox.</p>
           <button type="submit">Continue to installation</button>
         </section>
       </form>
       <section data-panel="2" hidden>
         <h2>Prepare your game</h2>
         <p id="install-help"></p>
-        <button id="prepare" type="button" disabled>Prepare and open installer</button>
+        <button id="prepare" type="button" disabled>Open the installer</button>
         <button id="to-test" type="button" hidden>Continue to game test</button>
-        <p class="muted">If preparation fails, expand the activity log below before retrying.
-          Don't start another GUI server against the same setups.</p>
+        <p class="muted">If something goes wrong, open the activity log below.</p>
       </section>
       <section data-panel="3" hidden>
-        <h2>Choose the executable and test</h2>
+        <h2>Choose the game and test it</h2>
         <p>Play briefly, then exit normally. Opening a window alone does not confirm the game works.</p>
         <label>Detected games<select id="candidates"><option value="">Choose a detected game, or browse</option></select></label>
         <p id="detection" class="muted"></p>
@@ -145,32 +221,33 @@
       </section>
       <section data-panel="4" hidden>
         <h2 id="finish-title">Did the game work?</h2>
-        <p id="finish-help">Confirm gameplay worked to add Play to your library and create the shortcuts you choose.</p>
-        <label class="check" id="acceptance"><input id="accepted" type="checkbox"> I tested gameplay and it works</label>
+        <p id="finish-help"></p>
         <fieldset id="shortcuts">
           <legend>Shortcuts</legend>
           <label class="check"><input id="shortcut-menu" type="checkbox" checked> Application menu</label>
           <label class="check"><input id="shortcut-desktop" type="checkbox"> Desktop</label>
           <p id="shortcut-status" class="field-status" role="status"></p>
         </fieldset>
-        <button id="save" type="button" disabled>Save game</button>
-        <button id="play" type="button" hidden>Play game</button>
-        <button id="retest" class="secondary" type="button">Back to game test</button>
+        <div class="actions finish-actions">
+          <button id="save" type="button" disabled>It works — save game</button>
+          <button id="play" type="button" hidden>Play game</button>
+          <button id="retest" class="secondary" type="button">Not yet — test again</button>
+        </div>
         <details id="technical" hidden>
           <summary>Technical details</summary>
           <dl id="technical-paths" class="advanced-fields"></dl>
         </details>
       </section>
       <div id="operation-controls" hidden>
-        <p>Keep this server running until the operation finishes. You can return to the library.</p>
+        <p>Keep Winebundle open until this finishes. You can go back to the library in the meantime.</p>
         <button id="stop" class="secondary" type="button" disabled>Stop game / installer</button>
-        <p class="muted">Stopping forcibly closes this game's Wine processes. Unsaved progress may be lost.</p>
+        <p class="muted">Stopping closes the game or installer immediately. Unsaved progress may be lost.</p>
       </div>
       <details id="activity">
         <summary>Activity log and troubleshooting</summary>
-        <p class="advanced-fields">Check that the game and runner paths still exist. Installer windows appear on your
-          desktop; finish and close them, including any game they open. Compatibility changes currently
-          require a new setup; this app does not automatically repair dependencies.</p>
+        <p class="advanced-fields">Installer windows open on your desktop: finish and close them, and any game
+          they start. If a step fails, check that the game's files haven't moved, then try again. To change
+          Wine or compatibility options, remove the game and add it again.</p>
         <pre id="log" tabindex="0" aria-label="Setup and game output"></pre>
         <button id="retry-refresh" class="secondary" type="button">Refresh status</button>
       </details>
@@ -200,5 +277,9 @@
       <button id="picker-choose" type="button" disabled>Choose</button>
     </div>
   </dialog>
+  <div id="drop-zone" class="drop-zone" hidden>
+    <p><strong>Drop to add this game</strong>
+      <span>A setup .exe or .msi, or the game's own .exe</span></p>
+  </div>
 </body>
 </html>

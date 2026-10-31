@@ -3,6 +3,7 @@
 Nothing here installs software or needs administrator rights. Fixes are returned
 as distribution-specific commands for the user to review and run themselves.
 """
+import importlib.util
 import os
 import re
 import shutil
@@ -44,6 +45,13 @@ WINETRICKS_INSTALL = {
     "arch": ["sudo pacman -S winetricks"],
     "suse": ["sudo zypper install winetricks"],
 }
+WEBKIT_INSTALL = {
+    "debian": ["sudo apt install python3-gi gir1.2-webkit-6.0"],
+    "fedora": ["sudo dnf install python3-gobject webkitgtk6.0"],
+    "arch": ["sudo pacman -S python-gobject webkitgtk-6.0"],
+    "suse": ["sudo zypper install python3-gobject typelib-1_0-WebKit-6_0"],
+}
+WEBKIT_TYPELIBS = ("WebKit-6.0.typelib", "WebKit2-4.1.typelib")
 ARCH_VULKAN = {"nvidia": "nvidia-utils", "i915": "vulkan-intel", "xe": "vulkan-intel",
                "amdgpu": "vulkan-radeon", "nouveau": "vulkan-nouveau"}
 WINEHQ = "https://wiki.winehq.org/Download"
@@ -152,11 +160,13 @@ def check_wine(family):
                     fix("Reinstall Wine.", WINE_INSTALL.get(family))), runner
     match = re.search(r"wine-(\d+)", version)
     if match and int(match.group(1)) < 8:
-        return item("wine", "Wine", "warning",
-                    f"{version} at {runner}. This is an older release; many recent games "
-                    "need Wine 8 or newer.", True,
-                    fix(f"Install a newer Wine. See {WINEHQ} for your distribution.")), runner
-    return item("wine", "Wine", "ok", f"{version} at {runner}, with its wineserver.", True), runner
+        result = item("wine", "Wine", "warning",
+                      f"{version} at {runner}. This is an older release; many recent games "
+                      "need Wine 8 or newer.", True,
+                      fix(f"Install a newer Wine. See {WINEHQ} for your distribution."))
+    else:
+        result = item("wine", "Wine", "ok", f"{version} at {runner}, with its wineserver.", True)
+    return {**result, "version": version}, runner
 
 
 def check_wine32(runner, family):
@@ -305,11 +315,28 @@ def check_winetricks(family):
                 remedy=fix("Install winetricks.", WINETRICKS_INSTALL.get(family)))
 
 
+def check_app_window(root, family, has_gi=None):
+    title = "App window (optional)"
+    if has_gi is None:
+        has_gi = importlib.util.find_spec("gi") is not None
+    found = has_gi and any((root / folder / "girepository-1.0" / name).is_file()
+                           for folder in LIBRARY_DIRS[64] for name in WEBKIT_TYPELIBS)
+    if found:
+        return item("app-window", title, "ok",
+                    "WebKitGTK is installed, so Winebundle opens in its own window.")
+    return item("app-window", title, "optional",
+                "WebKitGTK isn't installed, so Winebundle opens in your web browser instead "
+                "of its own window. Everything still works.",
+                remedy=fix("Install WebKitGTK, then reopen Winebundle.",
+                           WEBKIT_INSTALL.get(family)))
+
+
 def run(games_root=None, root=Path("/")):
     system = distro(root)
     family, distro_id = system["family"], system["id"]
     cards = gpus(root)
     wine, runner = check_wine(family)
+    version = wine.pop("version", "")
     checks = [
         wine,
         check_wine32(runner, family),
@@ -319,8 +346,10 @@ def run(games_root=None, root=Path("/")):
         check_disk(games_root or Path.home() / ".local/share/winebundle/local"),
         check_shortcuts(),
         check_winetricks(family),
+        check_app_window(root, family),
     ]
     errors = sum(check["status"] == "error" for check in checks)
     warnings = sum(check["status"] == "warning" for check in checks)
-    return {"distro": system, "checks": checks, "runner": runner, "ready": not errors,
+    return {"distro": system, "checks": checks, "runner": runner,
+            "runnerVersion": version, "ready": not errors,
             "errors": errors, "warnings": warnings}

@@ -26,7 +26,8 @@ from winebundle_config import (  # noqa: E402
     validate_config,
     write_config,
 )
-from local_setup import LocalSetup, browse, check_runner, default_runner, places  # noqa: E402
+from local_setup import (  # noqa: E402
+    LocalSetup, browse, check_runner, check_source, default_runner, places)
 import system_check  # noqa: E402
 
 
@@ -119,11 +120,26 @@ class JobStore:
 
 
 class WinebundleServer(ThreadingHTTPServer):
-    def __init__(self, address, handler, token):
+    def __init__(self, address, handler, token, builder=True):
         super().__init__(address, handler)
         self.token = token
+        self.builder = builder
+        # The page opens with this one-time code in its URL fragment and trades it for the
+        # token, so other local programs can't simply ask the server for the token.
+        self.launch_code = secrets.token_urlsafe(32)
+        self.launch_lock = threading.Lock()
         self.jobs = JobStore()
         self.local = LocalSetup()
+
+    def claim_launch(self, code):
+        with self.launch_lock:
+            if not self.launch_code or not secrets.compare_digest(code, self.launch_code):
+                return False
+            self.launch_code = ""
+            return True
+
+    def launch_url(self, base):
+        return f"{base}#launch={self.launch_code}"
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -134,9 +150,14 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _is_loopback(self):
         try:
-            return ipaddress.ip_address(self.client_address[0]).is_loopback
+            if not ipaddress.ip_address(self.client_address[0]).is_loopback:
+                return False
         except ValueError:
             return False
+        # Rejecting other Host names blocks DNS-rebinding pages from reading the token.
+        port = self.server.server_port
+        return self.headers.get("Host", "") in (
+            f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}")
 
     def _security_headers(self):
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -185,10 +206,16 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         path = urlparse(self.path).path
         if path == "/api/session":
+            if not (self._authorized() or self.server.claim_launch(
+                    self.headers.get("X-Winebundle-Launch", ""))):
+                self._send_json(403, {"error": "This Winebundle link has already been used. "
+                                      "Use the window that's already open, or restart Winebundle."})
+                return
             self._send_json(
                 200,
                 {
                     "token": self.server.token,
+                    "builder": self.server.builder,
                     "defaults": {
                         "version": 1,
                         "installArgs": [],
@@ -208,13 +235,19 @@ class RequestHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if path == "/api/preferences":
+            if not self._authorized():
+                self._send_json(403, {"error": "invalid session token"})
+            else:
+                self._send_json(200, self.server.local.preferences())
+            return
         if path == "/api/system":
             if not self._authorized():
                 self._send_json(403, {"error": "invalid session token"})
             else:
                 self._send_json(200, system_check.run(self.server.local.root))
             return
-        if path in ("/api/browse", "/api/runner"):
+        if path in ("/api/browse", "/api/runner", "/api/installer-check"):
             if not self._authorized():
                 self._send_json(403, {"error": "invalid session token"})
                 return
@@ -223,13 +256,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             try:
                 if path == "/api/runner":
                     self._send_json(200, check_runner(value))
+                elif path == "/api/installer-check":
+                    self._send_json(200, check_source(value, query.get("mode", ["installer"])[0]))
                 else:
                     self._send_json(200, browse(value, query.get("kind", ["installer"])[0],
                                                 query.get("hidden", ["0"])[0] == "1"))
             except (ConfigError, OSError) as exc:
                 self._send_json(400, {"error": str(exc)})
             return
-        if path.startswith("/api/jobs/"):
+        if path.startswith("/api/jobs/") and self.server.builder:
             if not self._authorized():
                 self._send_json(403, {"error": "invalid session token"})
                 return
@@ -253,14 +288,15 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": str(exc)})
             return
 
-        static_path = {
+        pages = {
             "/": STATIC / "local.html",
-            "/builder": STATIC / "index.html",
             "/app.css": STATIC / "app.css",
-            "/app.js": STATIC / "app.js",
             "/local": STATIC / "local.html",
             "/local.js": STATIC / "local.js",
-        }.get(path)
+        }
+        if self.server.builder:
+            pages.update({"/builder": STATIC / "index.html", "/app.js": STATIC / "app.js"})
+        static_path = pages.get(path)
         if static_path is None:
             self._send_json(404, {"error": "not found"})
             return
@@ -287,6 +323,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             if path == "/api/local":
                 self._send_json(201, {"id": self.server.local.create(request)})
                 return
+            if path == "/api/preferences":
+                self._send_json(200, self.server.local.set_preferences(request))
+                return
             if path.startswith("/api/local/"):
                 parts = path.removeprefix("/api/local/").split("/")
                 if len(parts) != 2:
@@ -299,12 +338,17 @@ class RequestHandler(BaseHTTPRequestHandler):
                 elif action == "shortcuts":
                     self._send_json(200, self.server.local.shortcuts(
                         game_id, request.get("menu"), request.get("desktop")))
+                elif action == "remove":
+                    self._send_json(200, self.server.local.remove(game_id))
                 elif action == "stop":
                     self.server.local.stop(game_id)
                     self._send_json(200, {"stopped": True})
                 else:
                     self.server.local.start(game_id, action, request)
                     self._send_json(202, {"id": game_id})
+                return
+            if not self.server.builder:
+                self._send_json(404, {"error": "not found"})
                 return
             config = validate_config(request.get("config"))
             if path == "/api/config/validate":
@@ -331,9 +375,9 @@ def main():
     token = secrets.token_urlsafe(32)
     server = WinebundleServer((args.host, args.port), RequestHandler, token)
     host = f"[{args.host}]" if ":" in args.host else args.host
-    url = f"http://{host}:{server.server_port}/"
-    print(f"winebundle GUI: listening at {url}")
-    print("winebundle GUI: press Ctrl+C to stop")
+    url = server.launch_url(f"http://{host}:{server.server_port}/")
+    print(f"winebundle GUI: listening at {url} (this link works once)")
+    print("winebundle GUI: press Ctrl+C to stop", flush=True)
     if not args.no_browser:
         threading.Timer(0.25, webbrowser.open, args=(url,)).start()
     try:

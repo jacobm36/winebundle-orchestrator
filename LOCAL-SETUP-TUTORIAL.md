@@ -35,27 +35,45 @@ isolate software from your Linux account: only run installers you trust.
 
 ## 1. Open the tool
 
-If the GUI is already running, open <http://127.0.0.1:8765/local>. Do not start a
-second server against the same setups.
-
-Otherwise, open a terminal and run:
+Open **Winebundle** from the application menu. To install it as a package,
+which also installs everything the app window needs:
 
 ```bash
 cd /home/jake/Projects/GamesRepo/winebundle-orchestrator
-python3 gui/winebundle_gui.py
+make deb
+sudo apt install ./dist/winebundle_0.1.0_all.deb
+make remove-menu-entry
 ```
 
-The browser opens **Your games**, the game library. Select **Add game** to
-start the guided setup. The `/local` address opens the same library.
-Keep the terminal and server running while installing, testing, or playing
-through the GUI. The separate VM builder is available under
-**Advanced: VM bundle builder** at `/builder`.
+The last command removes the earlier menu entry for this folder, so the menu
+opens the installed copy. To run from this folder without a package instead,
+add the menu entry once:
 
-On first run, the tool opens **System check**. It confirms Wine, 32-bit
-support, graphics drivers, and Vulkan, and gives copyable install commands for
-anything missing. On this machine, everything is reported as **OK**: Wine 9.0
-at `/usr/bin/wine` with its matching `/usr/bin/wineserver`. You can reopen it
-from **System check** in the header at any time.
+```bash
+cd /home/jake/Projects/GamesRepo/winebundle-orchestrator
+make install-menu-entry
+```
+
+You can also start it directly with `bin/winebundle`. Opening it again while
+it's running brings the existing window forward.
+
+The window opens on **Bring your Windows games to Linux**. Choose **A game installer** or
+**An installed game** to start the guided setup. Games you've already set up
+are listed below under **Your Windows games**. Keep Winebundle open while installing or testing; if
+you try to close it during one of those steps, it asks first. Games started
+with **Play** keep running after you close it.
+
+To use a web browser instead, run `python3 gui/winebundle_gui.py` (or
+`bin/winebundle --browser`). Don't run the app and a browser server against the
+same setups at the same time.
+
+On first run, Winebundle opens **Getting started**. Its first step checks this
+computer: Wine, 32-bit support, graphics drivers, and Vulkan, with copyable
+install commands for anything missing. Its second step, **Add your first
+game**, opens the guided setup for either a game installer or an installed
+game. On this machine, everything is reported as **OK**: Wine 9.0 at
+`/usr/bin/wine` with its matching `/usr/bin/wineserver`. The full report is
+under **System check** in the header at any time.
 
 The tool does not install packages or download Wine runners. If you choose a
 different runner, its matching `wineserver` must be beside it. Do not select a
@@ -72,31 +90,35 @@ behavior remain the same; follow the current button names in the text.
 
 ## 2. Create a separate setup
 
-Select **Add game** and enter:
+Under **Bring your Windows games to Linux**, select **A game installer** and enter:
 
 | Field | Blasphemous example |
 |---|---|
-| Game name | `Blasphemous` |
-| What are you adding? | `EXE/MSI installer` |
 | Installer file | Choose `setup_blasphemous_4.0.67.1_fixdlc_(64bit)_(85598).exe` from Downloads with **Browse...** |
-| Wine executable | `/usr/bin/wine` (prefilled) |
+| Game name | `Blasphemous` (filled in from the installer's file name; edit it if needed) |
+| Wine executable | `/usr/bin/wine` (prefilled; shown as **Using Wine 9.0.**) |
 | Architecture | `64-bit` |
 | DXVK release folder | Leave blank for this first attempt |
 | GPU name filter | Leave blank |
 | Installer arguments | Leave blank for an interactive installer |
 
-Architecture, DXVK, GPU filtering, and installer arguments are under
-**Compatibility and installer options**. The earlier form below is filled
+The Wine executable, architecture, DXVK, GPU filtering, and installer
+arguments are under **Wine and compatibility options**. The earlier form below is filled
 with the Blasphemous example values from the table.
 Replace the installer path with the file on your computer.
 
 ![Screenshot of the application setup form filled with the Blasphemous example name, installer path, and Wine runner.](docs/images/local-setup-step-2.png)
 
+Instead of selecting **A game installer**, you can drag the installer from
+your file manager onto the Winebundle window. Winebundle recognizes setup
+programs and opens the guided setup with the file and name filled in.
+
 **Browse...** opens the app's own file browser, which shows only folders and
 matching files (installers, EXEs, or programs) and remembers the last folder
 you used. The Wine executable is prefilled with `/usr/bin/wine` when it and
-its `wineserver` are installed; the status under it confirms this. To use a
-different Wine build, browse to its `bin/wine`.
+its `wineserver` are installed, and a line such as **Using Wine 9.0.**
+confirms this. To use a different Wine build, select **Change** and browse to
+its `bin/wine`. If Wine is missing, the options open with the problem shown.
 
 You can also type paths **without surrounding quotes**, even when they contain
 spaces or parentheses. Use complete Linux paths, not `~`.
@@ -112,7 +134,7 @@ prefix; 64-bit prefixes can also run 32-bit programs when Wine's required
 
 ## 3. Prepare the prefix and install
 
-Click **Prepare and open installer** (or **Prepare Wine environment** for an
+Click **Open the installer** (or **Set up Wine for this game** for an
 already-installed game).
 
 1. Wait for Wine to initialize the new prefix.
@@ -188,13 +210,13 @@ Your setup name and path will be different. The GOG path should now appear in
 2. Enter actual gameplay, rather than only checking the title screen.
 3. Check graphics, sound, keyboard/controller input, and saving if practical.
 4. Quit the game normally and wait for the test process to finish.
-5. On the **Finish** step, if it worked, check **I tested gameplay and it works**.
-6. Under **Shortcuts**, keep **Application menu** selected and, if you like,
-   select **Desktop**.
-7. Click **Save game**.
+5. On the **Finish** step, under **Shortcuts**, keep **Application menu**
+   selected and, if you like, select **Desktop**.
+6. If it worked, click **It works — save game**. If not, click
+   **Not yet — test again**.
 
 An installer finishing or a game exiting with code zero is not proof that
-gameplay works. Only confirm the checkbox after testing it yourself.
+gameplay works. Only choose **It works** after testing it yourself.
 
 The save button requires a successfully completed test in the current server
 session. After restarting the GUI, test again before saving a new shortcut.
@@ -248,6 +270,12 @@ Keep the runner, game, and prefix at their recorded paths.
 
 ## If something goes wrong
 
+- **".NET Framework Not Found" from GOG:** the file is a GOG Galaxy web
+  installer (`GOG_Galaxy_<Game>.exe`), not the game. Winebundle warns about
+  these in step 1. On GOG.com, open the game in your library and download the
+  offline backup installer (`setup_*.exe`), then use that.
+- **Remove a setup you don't want:** open it from the library and select
+  **Remove game...**. The installer file is kept.
 - **No installer window:** check the page's log and status. Wine initialization
   can take a little time. Look for an error before retrying.
 - **Preparation is still running:** close any installer, game, or remaining

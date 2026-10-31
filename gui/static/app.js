@@ -178,8 +178,15 @@ document.querySelector("#export-config").addEventListener("click", async () => {
   }
 });
 
-fetch("/api/session")
-  .then((response) => response.json())
+// Reuses the token the game library received when it opened in this tab.
+fetch("/api/session", {
+  headers: {"X-Winebundle-Token": sessionStorage.getItem("winebundle-token") || ""},
+})
+  .then(async (response) => {
+    const session = await response.json();
+    if (!response.ok) throw new Error(session.error || `Request failed (${response.status})`);
+    return session;
+  })
   .then((session) => {
     token = session.token;
     defaults = session.defaults;

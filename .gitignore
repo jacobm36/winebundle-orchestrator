@@ -5,3 +5,4 @@ artifacts/
 .tmp/
 __pycache__/
 *.pyc
+dist/

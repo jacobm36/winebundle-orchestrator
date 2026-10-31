@@ -81,9 +81,9 @@ class GuiApiTests(unittest.TestCase):
         cls.server.server_close()
         cls.thread.join()
 
-    def request(self, method, path, body=None, token=None):
+    def request(self, method, path, body=None, token=None, headers=None):
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
-        headers = {}
+        headers = dict(headers or {})
         encoded = None
         if body is not None:
             encoded = json.dumps(body)
@@ -105,9 +105,10 @@ class GuiApiTests(unittest.TestCase):
         }
 
     def test_session_and_validation(self):
-        status, session = self.request("GET", "/api/session")
+        status, session = self.request("GET", "/api/session", token=self.token)
         self.assertEqual(status, 200)
         self.assertEqual(session["token"], self.token)
+        self.assertTrue(session["builder"])
 
         status, result = self.request(
             "POST",
@@ -125,8 +126,39 @@ class GuiApiTests(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertIn("token", result["error"])
 
+    def test_session_token_needs_the_one_time_launch_code(self):
+        server = WinebundleServer(("127.0.0.1", 0), RequestHandler, "secret-token")
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            def session(headers):
+                connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+                connection.request("GET", "/api/session", headers=headers)
+                response = connection.getresponse()
+                body = json.loads(response.read())
+                connection.close()
+                return response.status, body
+
+            url = server.launch_url("http://127.0.0.1/")
+            code = url.split("#launch=", 1)[1]
+            self.assertGreater(len(code), 30)
+            status, body = session({})
+            self.assertEqual(status, 403)
+            self.assertNotIn("token", body)
+            self.assertEqual(session({"X-Winebundle-Launch": "wrong"})[0], 403)
+            status, body = session({"X-Winebundle-Launch": code})
+            self.assertEqual((status, body["token"]), (200, "secret-token"))
+            status, body = session({"X-Winebundle-Launch": code})
+            self.assertEqual(status, 403)
+            self.assertIn("already been used", body["error"])
+            self.assertEqual(session({"X-Winebundle-Token": "secret-token"})[0], 200)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
     def test_picker_and_runner_routes_require_token(self):
-        status, session = self.request("GET", "/api/session")
+        status, session = self.request("GET", "/api/session", token=self.token)
         self.assertIn("runner", session["local"])
         self.assertNotIn("local", session["defaults"])
         self.assertTrue(any(place["label"] == "Computer" for place in session["local"]["places"]))
@@ -145,6 +177,22 @@ class GuiApiTests(unittest.TestCase):
             status, result = self.request("GET", f"/api/runner?path={directory}/setup.exe", token=self.token)
             self.assertEqual(status, 200)
             self.assertIn("No executable", result["error"])
+            Path(directory, "GOG_Galaxy_Game.exe").write_text("x")
+            query = f"/api/installer-check?path={directory}/GOG_Galaxy_Game.exe"
+            self.assertEqual(self.request("GET", query)[0], 403)
+            status, result = self.request("GET", query, token=self.token)
+            self.assertEqual((status, result["warning"]["store"]), (200, "GOG Galaxy"))
+            Path(directory, "setup_blasphemous_4.0.67.1_(64bit)_(85598).exe").write_text("x")
+            status, result = self.request(
+                "GET", f"/api/installer-check?path={directory}/setup_blasphemous_4.0.67.1_"
+                "(64bit)_(85598).exe", token=self.token)
+            self.assertEqual((status, result), (200, {"warning": None, "name": "Blasphemous",
+                                                      "kind": "installer"}))
+            for path in (f"{directory}/missing.exe", "relative.exe"):
+                status, result = self.request(
+                    "GET", f"/api/installer-check?path={path}", token=self.token)
+                self.assertEqual((status, result),
+                                 (200, {"warning": None, "name": "", "kind": None}))
 
     def test_system_check_route_requires_token(self):
         self.assertEqual(self.request("GET", "/api/system")[0], 403)
@@ -155,7 +203,9 @@ class GuiApiTests(unittest.TestCase):
         self.assertIsInstance(result["ready"], bool)
 
     def test_library_is_home_and_builder_remains_available(self):
-        for path, expected in (("/", "Your games"), ("/local", "Your games"),
+        for path, expected in (("/", "Your Windows games"), ("/", 'id="welcome-title"'),
+                               ("/", 'id="add-installer"'),
+                               ("/local", "Your Windows games"),
                                ("/builder", "Bundle inputs")):
             with self.subTest(path=path):
                 connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
@@ -201,6 +251,12 @@ class GuiApiTests(unittest.TestCase):
                     start.assert_called_once_with(game_id, "play", {})
                 self.assertEqual(self.request("POST", "/api/local", [], self.token)[0], 400)
                 self.assertEqual(self.request("GET", "/api/local/not-an-id", token=self.token)[0], 400)
+                self.assertEqual(self.request("POST", f"/api/local/{game_id}/remove", {})[0], 403)
+                status, result = self.request("POST", f"/api/local/{game_id}/remove", {}, self.token)
+                self.assertEqual((status, result["name"]), (200, "API test"))
+                self.assertEqual(self.request("GET", "/api/local", token=self.token)[1], [])
+                self.assertEqual(self.request("POST", f"/api/local/{game_id}/remove",
+                                             {}, self.token)[0], 400)
 
     def test_failed_job_reports_log(self):
         status, result = self.request(
