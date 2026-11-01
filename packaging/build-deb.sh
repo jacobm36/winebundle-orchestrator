@@ -37,7 +37,7 @@ Upstream-Name: Winebundle
 Source: https://github.com/jacobm36/winebundle-orchestrator
 
 Files: *
-Copyright: 2026 jacobm36
+Copyright: 2026 Momentum Studios
 License: Expat
 COPYRIGHT
 sed 's/^$/./; s/^/ /' "$ROOT/LICENSE" | tail -n +3 >> "$PACKAGE/usr/share/doc/winebundle/copyright"
