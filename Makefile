@@ -1,4 +1,4 @@
-.PHONY: test install-menu-entry remove-menu-entry deb batocera release
+.PHONY: test install-menu-entry remove-menu-entry deb batocera release release-ubuntu release-batocera
 
 test:
 	bash worker/tests/test.sh
@@ -20,10 +20,13 @@ batocera:
 	tar -cf - --exclude=__pycache__ gui lib data VERSION packaging/batocera | \
 		ssh $(BATOCERA) 'mkdir -p /userdata/system/winebundle && tar -xf - -C /userdata/system/winebundle && sh /userdata/system/winebundle/packaging/batocera/install.sh'
 
-# Publish a GitHub release for the version in VERSION. Batocera users install the latest
-# release with get-winebundle.sh, which is attached to it.
-release:
-	@test -z "$$(git status --porcelain --untracked-files=no)" || { echo "Commit your changes first."; exit 1; }
-	git push origin HEAD
-	gh release create "v$$(cat VERSION)" packaging/batocera/get-winebundle.sh \
-		--target "$$(git rev-parse HEAD)" --title "Winebundle $$(cat VERSION)" --generate-notes
+# Publish GitHub releases for the version in VERSION. Ubuntu and Batocera are separate
+# release tracks (ubuntu-v<version> with the .deb, batocera-v<version> for the Batocera
+# installer); see packaging/release.sh.
+release-ubuntu:
+	packaging/release.sh ubuntu
+
+release-batocera:
+	packaging/release.sh batocera
+
+release: release-ubuntu release-batocera

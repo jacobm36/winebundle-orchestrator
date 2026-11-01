@@ -30,7 +30,7 @@ with open(sys.argv[2], "w") as entry:
 PYTHON
 cp "$ROOT/data/$APP_ID.svg" "$PACKAGE/usr/share/icons/hicolor/scalable/apps/"
 cp "$ROOT/data/$APP_ID.metainfo.xml" "$PACKAGE/usr/share/metainfo/"
-cp "$ROOT/README.md" "$ROOT/LOCAL-SETUP-TUTORIAL.md" "$PACKAGE/usr/share/doc/winebundle/"
+cp "$ROOT/README.md" "$ROOT/LOCAL-SETUP-TUTORIAL.md" "$ROOT/docs/UBUNTU.md" "$PACKAGE/usr/share/doc/winebundle/"
 cat > "$PACKAGE/usr/share/doc/winebundle/copyright" <<'COPYRIGHT'
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: Winebundle

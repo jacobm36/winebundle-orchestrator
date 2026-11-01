@@ -51,7 +51,7 @@ Full output: [batocera-probe-output.txt](batocera-probe-output.txt).
 - **glibc 2.40, FUSE available, 204 GB free on `/userdata`.**
 - **Ports launchers** are plain `.sh` files in `/userdata/roms/ports/`.
 
-## Batocera mode (built 2026-10-31, not yet tried on the machine)
+## Batocera mode (built 2026-10-31, opens on the machine since 2026-11-01)
 
 Winebundle switches to Batocera mode by itself when
 `/usr/share/batocera/batocera.version` exists. No AppImage is needed: Batocera's own
@@ -95,13 +95,15 @@ What it does:
 **For anyone:** run this on the Batocera machine (SSH or F1 → Applications → xterm):
 
 ```sh
-curl -fsSL https://github.com/jacobm36/winebundle-orchestrator/releases/latest/download/get-winebundle.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jacobm36/winebundle-orchestrator/master/packaging/batocera/get-winebundle.sh | sh
 ```
 
-[get-winebundle.sh](../packaging/batocera/get-winebundle.sh) is attached to every GitHub
-release (`make release`). It downloads that release's source, copies the same parts as
-`make batocera` into `/userdata/system/winebundle` (building the new copy beside the old
-one, then swapping), and runs `install.sh`. `WINEBUNDLE_VERSION=v0.1.0` picks a release.
+[get-winebundle.sh](../packaging/batocera/get-winebundle.sh) is fetched from `master` and
+finds the newest `batocera-v<version>` release (`make release-batocera`; Ubuntu releases are
+tagged `ubuntu-v<version>` and ignored). It downloads that release's source, copies the same
+parts as `make batocera` into `/userdata/system/winebundle` (building the new copy beside
+the old one, then swapping), and runs `install.sh`. `WINEBUNDLE_VERSION=0.1.0` picks a
+release. The user guide is [BATOCERA.md](BATOCERA.md).
 [uninstall.sh](../packaging/batocera/uninstall.sh) removes the app, its menu entries and the
 Ports files, and keeps games and Winebundle's records of them.
 
@@ -158,7 +160,7 @@ A/B match Jake's controller.
   pointer (Batocera hides it; F1 and Ports run `batocera-mouse show`). From Ports the
   window was blank white. On Batocera, WebKit's GPU renderer is now turned off
   (`WEBKIT_DISABLE_DMABUF_RENDERER`, `WEBKIT_DISABLE_COMPOSITING_MODE`), output is logged,
-  and an F1 Applications entry was added. Not yet confirmed on the machine.
+  and an F1 Applications entry was added. Confirmed working on the machine.
 - The first run on the TV couldn't be closed, because Batocera's Openbox draws no title
   bar. Fixed: on Batocera the window opens maximized with a **Quit** button,
   `winebundle_app.py --quit` closes it, and Ctrl+C over `ssh -t` works (confirmed).

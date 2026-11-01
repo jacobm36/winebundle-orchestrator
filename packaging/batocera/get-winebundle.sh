@@ -2,11 +2,12 @@
 # Installs or updates Winebundle on Batocera. Run on the Batocera machine (over SSH or
 # from F1 > Applications > xterm):
 #
-#   curl -fsSL https://github.com/jacobm36/winebundle-orchestrator/releases/latest/download/get-winebundle.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/jacobm36/winebundle-orchestrator/master/packaging/batocera/get-winebundle.sh | sh
 #
-# It downloads the latest release, puts it in /userdata/system/winebundle and adds
-# Winebundle to the Ports menu and F1 > Applications. Games and settings are kept when
-# updating. To install a particular release: ... | WINEBUNDLE_VERSION=v0.1.0 sh
+# It downloads the newest Batocera release (tagged batocera-v<version>), puts it in
+# /userdata/system/winebundle and adds Winebundle to the Ports menu and F1 > Applications.
+# Games and settings are kept when updating. To install a particular release:
+# ... | WINEBUNDLE_VERSION=0.1.0 sh
 set -eu
 
 REPO=jacobm36/winebundle-orchestrator
@@ -24,12 +25,25 @@ done
 
 TAG=${WINEBUNDLE_VERSION:-}
 if [ -z "$TAG" ]; then
-    TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" |
-          python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"])') ||
-        fail "couldn't find the latest release. Is this machine online?"
+    # The repository also has Ubuntu releases, so GitHub's "latest" may not be for Batocera.
+    TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=100" |
+          python3 -c '
+import json, sys
+for release in json.load(sys.stdin):
+    if (release["tag_name"].startswith("batocera-v") and not release["draft"]
+            and not release["prerelease"]):
+        print(release["tag_name"])
+        break
+') || fail "couldn't find the latest release. Is this machine online?"
+    [ -n "$TAG" ] || fail "there's no Batocera release yet."
 fi
 case $TAG in
-    *[!A-Za-z0-9._-]*|"") fail "invalid version: $TAG" ;;
+    batocera-v*) ;;
+    v*) TAG=batocera-$TAG ;;
+    *) TAG=batocera-v$TAG ;;
+esac
+case $TAG in
+    *[!A-Za-z0-9._-]*) fail "invalid version: $TAG" ;;
 esac
 
 WORK=$(mktemp -d)
