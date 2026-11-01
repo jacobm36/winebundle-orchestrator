@@ -416,11 +416,22 @@ and are shared with the web GUI.
 ## Running on Batocera
 
 Winebundle also runs on [Batocera](https://batocera.org) 43 (x86 PC), using Batocera's
-own Python, GTK and WebKit. Install or update it from a checkout on another computer:
+own Python, GTK and WebKit. To install or update it, run this on the Batocera machine,
+over SSH (`ssh root@batocera.local`, password `linux`) or in F1 → Applications → xterm:
 
-```bash
-make batocera          # copies to root@batocera.local; password "linux"
+```sh
+curl -fsSL https://github.com/jacobm36/winebundle-orchestrator/releases/latest/download/get-winebundle.sh | sh
 ```
+
+It installs the latest release into `/userdata/system/winebundle`. Updating keeps your
+games and settings. To remove Winebundle (games it added stay in Batocera's Windows menu):
+
+```sh
+sh /userdata/system/winebundle/packaging/batocera/uninstall.sh
+```
+
+From a checkout on another computer, `make batocera` copies your working copy instead
+(to `root@batocera.local`; set `BATOCERA=root@<address>` for another machine).
 
 Then start it from **F1 → Applications → Winebundle** (keyboard and mouse), or from
 **Ports → Winebundle**, where Hotkey + Start closes it and the D-pad, A and B move
@@ -814,6 +825,10 @@ make test
 ```
 
 The test target also runs the Python configuration and GUI API tests.
+
+To publish a release, update `VERSION`, commit, and run `make release` (needs the `gh`
+CLI). It creates the `v<VERSION>` GitHub release with `get-winebundle.sh` attached, which
+is what the Batocera install command downloads.
 
 ## License
 

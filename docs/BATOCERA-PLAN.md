@@ -92,7 +92,20 @@ What it does:
 
 ### Install or update on Batocera
 
-From this checkout on the laptop (the password is `linux`):
+**For anyone:** run this on the Batocera machine (SSH or F1 → Applications → xterm):
+
+```sh
+curl -fsSL https://github.com/jacobm36/winebundle-orchestrator/releases/latest/download/get-winebundle.sh | sh
+```
+
+[get-winebundle.sh](../packaging/batocera/get-winebundle.sh) is attached to every GitHub
+release (`make release`). It downloads that release's source, copies the same parts as
+`make batocera` into `/userdata/system/winebundle` (building the new copy beside the old
+one, then swapping), and runs `install.sh`. `WINEBUNDLE_VERSION=v0.1.0` picks a release.
+[uninstall.sh](../packaging/batocera/uninstall.sh) removes the app, its menu entries and the
+Ports files, and keeps games and Winebundle's records of them.
+
+**While developing,** from this checkout on the laptop (the password is `linux`):
 
 ```sh
 make batocera                    # or: make batocera BATOCERA=root@192.168.x.x
