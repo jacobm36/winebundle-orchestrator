@@ -66,7 +66,8 @@ Decisions made with Jake:
   which is its Wine prefix. Names that are taken get ` (2)`, ` (3)`, ….
 - **Compress:** a **Compress for Batocera** button on a finished game makes
   `<Name>.wsquashfs` (`mksquashfs … -comp zstd`) and deletes the folder.
-- **Ports entry:** Winebundle is started from **Ports → Winebundle**.
+- **Ports entry:** Winebundle is started from **Ports → Winebundle**, or with a mouse
+  from **F1 → Applications → Winebundle**.
 
 What it does:
 
@@ -99,12 +100,16 @@ make batocera                    # or: make batocera BATOCERA=root@192.168.x.x
 
 This copies `gui`, `lib`, `data`, `VERSION` and `packaging/batocera` to
 `/userdata/system/winebundle/`, then puts `Winebundle.sh` and its `.keys` file in
-`/userdata/roms/ports/` and reloads the game list. Run it again after any change.
+`/userdata/roms/ports/`, adds `winebundle.desktop` (category `batocera.linux`) to
+`/userdata/system/.local/share/applications/` for the F1 Applications menu, and reloads
+the game list. Run it again after any change. Winebundle's output goes to
+`/userdata/system/logs/winebundle.log`.
 
 ### First test on the machine
 
-1. Open **Ports → Winebundle**. Check that the controller moves between controls and
-   that **Hotkey + Start** closes it.
+1. Open **F1 → Applications → Winebundle** (keyboard and mouse), then try
+   **Ports → Winebundle** (controller). Check that the controller moves between controls
+   and that **Hotkey + Start** closes it.
 2. Open **System check**: Wine should be `wine-proton`, with no errors.
 3. Add a small game you already know works (an installer from
    `/userdata/roms/windows_installers` is ideal). Install, test, then select
@@ -113,8 +118,10 @@ This copies `gui`, `lib`, `data`, `VERSION` and `packaging/batocera` to
 5. Try **Compress for Batocera** on it, then launch the `.wsquashfs` from the menu.
 6. If anything fails, open **Activity log and troubleshooting** in Winebundle, or copy
    `/userdata/system/.local/share/winebundle/local/<game>/activity.log`, and share it.
+   If the window is blank, share `/userdata/system/logs/winebundle.log`.
    To start Winebundle from the laptop and see its output instead:
-   `ssh -t root@batocera.local DISPLAY=:0 python3 /userdata/system/winebundle/gui/winebundle_app.py`.
+   `ssh -t root@batocera.local 'batocera-mouse show; DISPLAY=:0 python3 /userdata/system/winebundle/gui/winebundle_app.py; batocera-mouse hide'`.
+   Batocera hides the mouse pointer except in F1 and Ports, hence `batocera-mouse`.
 
 Not known until tested: whether Wine starts correctly from Winebundle with the copied
 library paths, whether evmapy applies the `.keys` file to the Ports script, and whether
@@ -132,6 +139,11 @@ A/B match Jake's controller.
 
 - The probe script ([packaging/batocera/batocera-probe.sh](../packaging/batocera/batocera-probe.sh))
   was run on 2026-10-31. An AppImage turned out to be unnecessary.
+- First run of Batocera mode (2026-10-31): over SSH the window worked but had no mouse
+  pointer (Batocera hides it; F1 and Ports run `batocera-mouse show`). From Ports the
+  window was blank white. On Batocera, WebKit's GPU renderer is now turned off
+  (`WEBKIT_DISABLE_DMABUF_RENDERER`, `WEBKIT_DISABLE_COMPOSITING_MODE`), output is logged,
+  and an F1 Applications entry was added. Not yet confirmed on the machine.
 - The first run on the TV couldn't be closed, because Batocera's Openbox draws no title
   bar. Fixed: on Batocera the window opens maximized with a **Quit** button,
   `winebundle_app.py --quit` closes it, and Ctrl+C over `ssh -t` works (confirmed).

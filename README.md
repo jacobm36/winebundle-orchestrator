@@ -422,8 +422,9 @@ own Python, GTK and WebKit. Install or update it from a checkout on another comp
 make batocera          # copies to root@batocera.local; password "linux"
 ```
 
-Then start it from **Ports → Winebundle**. Hotkey + Start closes it, and the D-pad, A
-and B move around and select. It detects Batocera by itself and changes how games are
+Then start it from **F1 → Applications → Winebundle** (keyboard and mouse), or from
+**Ports → Winebundle**, where Hotkey + Start closes it and the D-pad, A and B move
+around and select. It detects Batocera by itself and changes how games are
 set up:
 
 - Only Batocera's Wine builds are offered (`wine-proton` by default, `wine-tkg`, and

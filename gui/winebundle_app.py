@@ -31,6 +31,19 @@ def bare_session(root=Path("/"), environ=None):
             or not (environ.get("XDG_CURRENT_DESKTOP") or environ.get("DESKTOP_SESSION")))
 
 
+def batocera_webkit(root=Path("/"), environ=None):
+    """On Batocera, draw the page without WebKit's GPU renderer.
+
+    Batocera starts Ports and F1 apps with the environment it prepares for games, where
+    WebKit's GPU renderer can leave the window blank. Winebundle's pages are simple, so
+    drawing them on the CPU costs nothing noticeable.
+    """
+    environ = os.environ if environ is None else environ
+    if (Path(root) / BATOCERA_VERSION).is_file():
+        environ.setdefault("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
+        environ.setdefault("WEBKIT_DISABLE_COMPOSITING_MODE", "1")
+
+
 def pid_file(environ=None):
     environ = os.environ if environ is None else environ
     base = environ.get("XDG_RUNTIME_DIR") or environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
@@ -393,6 +406,7 @@ def main(argv=None):
         print("Removed:\n" + "\n".join(f"  {path}" for path in removed) if removed
               else "Winebundle was not in the application menu.")
         return 0
+    batocera_webkit()
     toolkit = None if args.browser else load_toolkit()
     if toolkit:
         if webkit_sandbox_blocked():

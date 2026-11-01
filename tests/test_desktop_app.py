@@ -122,6 +122,19 @@ class QuitTests(unittest.TestCase):
             version.write_text("43.1\n")
             self.assertTrue(winebundle_app.bare_session(root, desktop))
 
+    def test_batocera_draws_webkit_without_the_gpu_renderer(self):
+        with tempfile.TemporaryDirectory() as root:
+            environ = {}
+            winebundle_app.batocera_webkit(root, environ)
+            self.assertEqual(environ, {})
+            version = Path(root) / winebundle_app.BATOCERA_VERSION
+            version.parent.mkdir(parents=True)
+            version.write_text("43.1\n")
+            environ = {"WEBKIT_DISABLE_COMPOSITING_MODE": "0"}
+            winebundle_app.batocera_webkit(root, environ)
+            self.assertEqual(environ, {"WEBKIT_DISABLE_DMABUF_RENDERER": "1",
+                                       "WEBKIT_DISABLE_COMPOSITING_MODE": "0"})
+
     def test_pid_file_location(self):
         self.assertEqual(winebundle_app.pid_file({"XDG_RUNTIME_DIR": "/run/user/1"}),
                          Path("/run/user/1/winebundle/app.pid"))
