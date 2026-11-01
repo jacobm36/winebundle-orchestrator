@@ -100,7 +100,9 @@ make batocera                    # or: make batocera BATOCERA=root@192.168.x.x
 
 This copies `gui`, `lib`, `data`, `VERSION` and `packaging/batocera` to
 `/userdata/system/winebundle/`, then puts `Winebundle.sh` and its `.keys` file in
-`/userdata/roms/ports/`, adds `winebundle.desktop` (category `batocera.linux`) to
+`/userdata/roms/ports/` with the logo as `Winebundle.png`, adds `winebundle.desktop`
+(using `data/io.github.jacobm36.Winebundle.png`, since F1's file manager may not draw
+SVG icons) (category `batocera.linux`) to
 `/userdata/system/.local/share/applications/` for the F1 Applications menu, and reloads
 the game list. Run it again after any change. Winebundle's output goes to
 `/userdata/system/logs/winebundle.log`.

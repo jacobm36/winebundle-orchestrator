@@ -12,6 +12,8 @@ APPS=/userdata/system/.local/share/applications
 
 mkdir -p "$PORTS" "$APPS"
 cp "$HERE/Winebundle.sh" "$HERE/Winebundle.sh.keys" "$PORTS/"
+# The picture EmulationStation shows for the Ports entry, as for other ports.
+cp "$APP/data/io.github.jacobm36.Winebundle.png" "$PORTS/Winebundle.png"
 chmod 755 "$PORTS/Winebundle.sh" "$HERE/Winebundle.sh"
 cat > "$APPS/winebundle.desktop.tmp" <<ENTRY
 [Desktop Entry]
@@ -19,7 +21,7 @@ Version=1.0
 Type=Application
 Name=Winebundle
 Comment=Install Windows games for Batocera
-Icon=$APP/data/io.github.jacobm36.Winebundle.svg
+Icon=$APP/data/io.github.jacobm36.Winebundle.png
 Exec=/bin/bash $HERE/Winebundle.sh
 Terminal=false
 Categories=Game;batocera.linux;
