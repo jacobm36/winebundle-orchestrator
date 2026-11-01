@@ -66,6 +66,16 @@ class GraphicsTests(unittest.TestCase):
         self.card(1, "0000:01:00.0", "0x10de", "vfio-pci")
         self.assertIsNone(graphics.discrete_gpu(self.root))
 
+    def test_batocera_chooses_the_card_itself(self):
+        self.card(0, "0000:00:02.0", "0x8086", "i915", boot=True)
+        self.card(1, "0000:01:00.0", "0x10de", "nvidia")
+        self.assertFalse(graphics.system_managed(self.root))
+        version = self.root / "usr/share/batocera/batocera.version"
+        version.parent.mkdir(parents=True)
+        version.write_text("43.1\n")
+        self.assertTrue(graphics.system_managed(self.root))
+        self.assertIsNone(graphics.discrete_gpu(self.root))
+
     def test_switcheroo_is_preferred_and_falls_back_to_sysfs(self):
         def reply(data, code=0):
             return subprocess.CompletedProcess([], code, stdout=json.dumps(data), stderr="")

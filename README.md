@@ -271,7 +271,8 @@ what settings it needs, the same way GNOME's "Launch using Discrete Graphics
 Card" does. Without it, Winebundle reads `/sys` and uses NVIDIA's PRIME
 render offload or Mesa's `DRI_PRIME`. Saved launchers are updated when
 Winebundle starts, so they follow driver changes. The option isn't shown on
-computers with one graphics card. The older **GPU name filter** option is
+computers with one graphics card, or on Batocera, where Batocera's own menu
+chooses the card and Winebundle leaves its settings alone. The older **GPU name filter** option is
 separate: it only tells DXVK which card to use by name.
 
 **Store web installers:** Winebundle needs a game's offline installer.

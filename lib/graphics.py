@@ -90,9 +90,16 @@ def _sysfs(root):
     return None
 
 
+def system_managed(root=Path("/")):
+    """True where the system picks the graphics card itself, as Batocera's menu does."""
+    return (Path(root) / "usr/share/batocera/batocera.version").is_file()
+
+
 def discrete_gpu(root=Path("/")):
     """Return {"name", "env"} for a second, more powerful card, or None when there isn't one."""
     root = Path(root)
+    if system_managed(root):
+        return None
     if root == Path("/"):
         found = _switcheroo()
         if found is not None:

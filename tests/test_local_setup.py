@@ -148,6 +148,21 @@ class LocalSetupTests(unittest.TestCase):
         self.assertEqual(launched(), ("", ""))
         self.assertFalse(self.store.get(game_id)["graphics"]["available"])
 
+    def test_system_managed_graphics_are_left_alone(self):
+        with patch("graphics.system_managed", return_value=True):
+            self.store = LocalSetup(self.store.root)
+        game_id = self.create()
+        self.prepare(game_id)
+        self.store.start(game_id, "test", {"entrypoint": str(self.game)})
+        self.assertEqual(self.finish(game_id)["status"], "finished")
+        with patch.dict(os.environ, {"XDG_DATA_HOME": str(self.base / "data")}):
+            launcher = self.store.save(game_id, True)["launcher"]
+        self.assertNotIn("DRI_PRIME", Path(launcher).read_text())
+        subprocess.run([launcher], check=True, env={**os.environ, "DRI_PRIME": "1"})
+        invocation = self.base / "setups" / game_id / "invocation.json"
+        self.assertEqual(json.loads(invocation.read_text())["prime"], "1")
+        self.assertFalse(self.store.get(game_id)["graphics"]["available"])
+
     def test_installer_and_dxvk(self):
         dxvk = self.base / "dxvk"
         for architecture in ("x64", "x32"):

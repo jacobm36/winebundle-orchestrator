@@ -121,6 +121,14 @@ Questions the output answers:
    `/userdata/roms/windows/`. This reuses most of step 3 and can be built without the
    Batocera machine. It is a good first job if work resumes before the machine is back.
 
+## Graphics card: Batocera decides
+
+Batocera's own menu chooses the graphics card, so Winebundle stays out of it there:
+no card detection, no graphics option in the app, and inherited graphics settings
+(`DRI_PRIME`, NVIDIA offload variables) are passed through unchanged. This is
+automatic when `/usr/share/batocera/batocera.version` exists. Games exported for
+Batocera must not set these variables in `autorun.cmd` either.
+
 ## Relevant code
 
 - [lib/batocera_import.py](../lib/batocera_import.py) — existing Batocera import logic and

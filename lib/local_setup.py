@@ -282,6 +282,8 @@ class LocalSetup:
         self.jobs = {}
         self.process = None
         self.detect = graphics.discrete_gpu
+        # Leave inherited graphics settings alone where the system chooses the card.
+        self.graphics_variables = () if graphics.system_managed() else graphics.VARIABLES
 
     def _directory(self, game_id):
         if not isinstance(game_id, str) or len(game_id) > 64 or not GAME_ID.fullmatch(game_id):
@@ -562,7 +564,7 @@ class LocalSetup:
     def _environment(self, game_id, config):
         env = os.environ.copy()
         for key in ("WINEPREFIX", "WINEARCH", "WINEDLLOVERRIDES", "WINELOADER",
-                    "WINESERVER", "DXVK_FILTER_DEVICE_NAME") + graphics.VARIABLES:
+                    "WINESERVER", "DXVK_FILTER_DEVICE_NAME") + self.graphics_variables:
             env.pop(key, None)
         env.update(WINEPREFIX=str(self._directory(game_id) / "prefix"),
                    WINEDEBUG="-all", WINESERVER=config["wineserver"])
@@ -722,11 +724,11 @@ class LocalSetup:
     def _write_launcher(self, game_id, config):
         env = self._environment(game_id, config)
         script = self._directory(game_id) / "play.sh"
-        keys = ("WINEPREFIX", "WINESERVER", "WINEDEBUG", "DXVK_FILTER_DEVICE_NAME") + graphics.VARIABLES
+        keys = ("WINEPREFIX", "WINESERVER", "WINEDEBUG", "DXVK_FILTER_DEVICE_NAME") + self.graphics_variables
         assignments = {key: env[key] for key in keys if key in env}
         text = "#!/usr/bin/env bash\nset -euo pipefail\n"
         text += "unset " + " ".join(("WINEARCH", "WINEDLLOVERRIDES", "WINELOADER",
-                                     "DXVK_FILTER_DEVICE_NAME") + graphics.VARIABLES) + "\n"
+                                     "DXVK_FILTER_DEVICE_NAME") + self.graphics_variables) + "\n"
         text += "".join(f"export {key}={shlex.quote(value)}\n" for key, value in assignments.items())
         text += f"cd -- {shlex.quote(str(Path(config['entrypoint']).parent))}\n"
         text += "exec " + shlex.join([config["runner"], config["entrypoint"]] + config["args"]) + ' "$@"\n'
