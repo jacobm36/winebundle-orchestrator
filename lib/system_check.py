@@ -10,6 +10,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import batocera
 import graphics
 import local_setup
 
@@ -142,14 +143,22 @@ def item(check_id, title, status, detail, required=False, remedy=None):
 
 def check_wine(family):
     runner = local_setup.default_runner()
+    on_batocera = family == "batocera"
     if not runner:
+        if on_batocera:
+            return item("wine", "Wine", "error",
+                        f"None of Batocera's Wine versions were found in {batocera.SYSTEM_WINE} "
+                        f"or {batocera.CUSTOM_WINE}.", True,
+                        fix("Update Batocera, or add a Wine version to "
+                            f"{batocera.CUSTOM_WINE}.")), ""
         return item("wine", "Wine", "error",
                     "Wine wasn't found at /usr/bin/wine or on your PATH. It's needed to "
                     "run Windows games. You can also choose another Wine build per game.",
                     True, fix("Install Wine from your distribution's packages, or see "
                               f"{WINEHQ} for newer versions.", WINE_INSTALL.get(family))), ""
+    env = {**os.environ, **batocera.wine_environment(runner)} if on_batocera else None
     try:
-        result = subprocess.run([runner, "--version"], stdin=subprocess.DEVNULL,
+        result = subprocess.run([runner, "--version"], stdin=subprocess.DEVNULL, env=env,
                                 capture_output=True, text=True, timeout=15)
         version = result.stdout.strip() if result.returncode == 0 else ""
     except (OSError, subprocess.SubprocessError):
@@ -158,7 +167,8 @@ def check_wine(family):
         return item("wine", "Wine", "warning",
                     f"Wine was found at {runner}, but it didn't report its version. "
                     "It may be damaged or incomplete.", True,
-                    fix("Reinstall Wine.", WINE_INSTALL.get(family))), runner
+                    fix("Choose another Wine version when adding a game." if on_batocera
+                        else "Reinstall Wine.", WINE_INSTALL.get(family))), runner
     match = re.search(r"wine-(\d+)", version)
     if match and int(match.group(1)) < 8:
         result = item("wine", "Wine", "warning",
@@ -187,6 +197,8 @@ def check_wine32(runner, family):
                      ["sudo pacman -Syu wine"])
     elif family == "fedora":
         remedy = fix("Install Wine's 32-bit packages (wine-core.i686 on older Fedora releases).")
+    elif family == "batocera":
+        remedy = fix("Choose another Wine version when adding a game.")
     else:
         remedy = fix("Install Wine's 32-bit support.", WINE32_INSTALL.get(family))
     return item("wine32", title, "warning", text, remedy=remedy)
@@ -332,23 +344,46 @@ def check_app_window(root, family, has_gi=None):
                            WEBKIT_INSTALL.get(family)))
 
 
+def check_batocera():
+    title = "Batocera Windows games"
+    folder = nearest_existing(batocera.ROMS)
+    if not os.access(folder, os.W_OK):
+        return item("batocera", title, "error",
+                    f"{batocera.ROMS} isn't writable, so games can't be added to Batocera's "
+                    "Windows menu.", True)
+    parts = [f"Games are installed in {batocera.ROMS} and appear in Batocera's Windows menu."]
+    if shutil.which("mksquashfs"):
+        parts.append("Saved games can be compressed to .wsquashfs files.")
+    else:
+        parts.append("mksquashfs wasn't found, so games can't be compressed.")
+    return item("batocera", title, "ok", " ".join(parts))
+
+
 def run(games_root=None, root=Path("/")):
     system = distro(root)
     family, distro_id = system["family"], system["id"]
+    on_batocera = batocera.active(root)
+    if on_batocera:
+        family = "batocera"
     cards = gpus(root)
     wine, runner = check_wine(family)
     version = wine.pop("version", "")
-    checks = [
-        wine,
-        check_wine32(runner, family),
-        check_gpu(distro_id, cards),
-        check_vulkan(root, family, distro_id, cards, 64),
-        check_vulkan(root, family, distro_id, cards, 32),
-        check_disk(games_root or Path.home() / ".local/share/winebundle/local"),
-        check_shortcuts(),
-        check_winetricks(family),
-        check_app_window(root, family),
-    ]
+    if on_batocera:
+        # Batocera ships its own Wine, Vulkan and window libraries and has no package manager.
+        checks = [wine, check_wine32(runner, family), check_gpu(distro_id, cards),
+                  check_disk(batocera.ROMS), check_batocera()]
+    else:
+        checks = [
+            wine,
+            check_wine32(runner, family),
+            check_gpu(distro_id, cards),
+            check_vulkan(root, family, distro_id, cards, 64),
+            check_vulkan(root, family, distro_id, cards, 32),
+            check_disk(games_root or Path.home() / ".local/share/winebundle/local"),
+            check_shortcuts(),
+            check_winetricks(family),
+            check_app_window(root, family),
+        ]
     errors = sum(check["status"] == "error" for check in checks)
     warnings = sum(check["status"] == "warning" for check in checks)
     card = graphics.discrete_gpu(root)

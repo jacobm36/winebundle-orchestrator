@@ -28,6 +28,7 @@ from winebundle_config import (  # noqa: E402
 )
 from local_setup import (  # noqa: E402
     LocalSetup, browse, check_runner, check_source, default_runner, places)
+import batocera  # noqa: E402
 import system_check  # noqa: E402
 
 
@@ -234,7 +235,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                         "skipProvision": False,
                         "keepVm": False,
                     },
-                    "local": {"runner": default_runner(), "places": places()},
+                    "local": {"runner": default_runner(), "places": places(),
+                              "batocera": {"runners": batocera.runners(),
+                                           "games": str(batocera.ROMS)}
+                              if self.server.local.batocera else None},
                 },
             )
             return

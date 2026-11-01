@@ -239,9 +239,13 @@ function tested() {
 function statusText(setup) {
   if (setup.status === "running") {
     return setup.action === "prepare" ? "Installing / preparing" :
-      setup.action === "play" ? "Playing" : "Testing game";
+      setup.action === "play" ? "Playing" :
+      setup.action === "compress" ? "Compressing for Batocera" : "Testing game";
   }
   if (setup.status === "failed") return "Needs attention";
+  if (setup.accepted && setup.prefix) {
+    return setup.compressed ? "Compressed, in Batocera's Windows menu" : "In Batocera's Windows menu";
+  }
   return setup.accepted ? "Ready to play" :
     setup.prepared ? "Ready to test" : "Installation needed";
 }
@@ -289,7 +293,7 @@ function library() {
     status.textContent = statusText(setup);
     const actions = document.createElement("div");
     actions.className = "actions";
-    if (setup.accepted) {
+    if (setup.accepted && !setup.prefix) {
       const play = document.createElement("button");
       play.type = "button";
       play.dataset.libraryAction = `play-${setup.id}`;
@@ -338,7 +342,10 @@ function render() {
   el("save").disabled = pending || !connected || busy() || !tested() || Boolean(config && config.accepted);
   el("stop").disabled = pending || !connected || !running;
   el("operation-controls").hidden = !running;
-  el("play").hidden = !config || !config.accepted;
+  const batocera = state && state.batocera;
+  el("play").hidden = !config || !config.accepted || Boolean(batocera);
+  el("shortcuts").hidden = Boolean(batocera);
+  renderBatocera(config, batocera);
   el("play").disabled = pending || !connected || busy();
   el("save").hidden = Boolean(config && config.accepted);
   el("to-test").hidden = !config || !config.prepared;
@@ -347,7 +354,11 @@ function render() {
   el("to-finish").disabled = pending || Boolean(running);
   el("retest").disabled = pending || Boolean(running);
   el("finish-title").textContent = config && config.accepted ? "Your game is ready" : "Did the game work?";
-  el("finish-help").textContent = config && config.accepted ?
+  el("finish-help").textContent = batocera ? (config.accepted ?
+    "Launch it from Batocera's Windows menu." :
+    tested() ? "If you played it and it works, save it to add it to Batocera's Windows menu." :
+    "Test the game first, then come back here to save it.") :
+    config && config.accepted ?
     `Play from your library${shortcutText(state.shortcuts)}. Shortcuts work without this app; change them below.` :
     tested() ? "If you played it and it works, save it to your library with the shortcuts you choose." :
     "Test the game first, then come back here to save it.";
@@ -379,6 +390,24 @@ function render() {
   if (running) el("remove-confirm").hidden = true;
   el("remove-yes").disabled = pending || !connected || Boolean(running);
   showStep(step);
+}
+function renderBatocera(config, batocera) {
+  el("batocera").hidden = !(batocera && config.accepted);
+  el("retest").hidden = Boolean(batocera && batocera.compressed);
+  if (!batocera) return;
+  let text = batocera.compressed ?
+    `${batocera.menuName} is in Batocera's Windows menu as a compressed file: ${batocera.compressed}.` :
+    `${batocera.menuName} is in Batocera's Windows menu. Its files are in ${batocera.folder}.`;
+  if (!batocera.runner) {
+    text += " Batocera can't use the Wine version it was set up with, so choose a Wine " +
+      "version from Batocera's menu for it, or add the game again with one of Batocera's.";
+  } else if (config.batoceraRunner === false) {
+    text += ` In the game's settings in Batocera, set WINE RUNNER to ${batocera.runner}.`;
+  }
+  if (batocera.outside) text += " The game's own files are outside this folder, so it can't be compressed.";
+  el("batocera-text").textContent = text;
+  el("compress-group").hidden = !batocera.compressible;
+  el("compress").disabled = pending || !connected || busy();
 }
 function shortcutText(shortcuts) {
   const places = [shortcuts && shortcuts.menu && "your application menu",
@@ -462,6 +491,8 @@ async function refresh(fill = false, completedAction = "") {
       } else if (state.action === "prepare") {
         step = 3;
         message("Ready to test. Check the game's .exe, then select Test game.");
+      } else if (state.action === "compress") {
+        message("Compressed. Batocera's Windows menu now lists the .wsquashfs file.");
       } else if (state.action === "test") {
         step = 4;
         message("The game exited. If it worked, save it on the Finish step.");
@@ -497,8 +528,11 @@ async function perform(action, body = {}) {
   render();
   try {
     await api(`/api/local/${current}/${action}`, body);
-    if (action === "save") message(`Saved. Play from your library${shortcutText({
+    if (action === "save" && state && state.batocera) {
+      message(`Saved. ${state.config.name} is now in Batocera's Windows menu.`);
+    } else if (action === "save") message(`Saved. Play from your library${shortcutText({
       menu: body.menu, desktop: body.desktop})}.`);
+    else if (action === "compress") message("Compressing. This can take several minutes for large games.");
     else if (action === "stop") message("Stopping. This can take a few seconds.");
     else message(action === "prepare" ?
       "Preparing. Watch for installer windows on your desktop; finish and close them to continue." :
@@ -587,6 +621,7 @@ function showRunner() {
   if (problem) el("options").open = true;
 }
 async function checkRunner() {
+  syncRunnerChoice();
   clearTimeout(runnerTimer);
   const version = ++runnerRevision, value = el("runner").value.trim();
   const status = el("runner-status");
@@ -614,6 +649,7 @@ el("runner-change").addEventListener("click", () => {
 // A required field inside closed options can't be focused, so open them first.
 el("runner").addEventListener("invalid", () => { el("options").open = true; });
 el("runner").addEventListener("input", () => {
+  syncRunnerChoice();
   clearTimeout(runnerTimer);
   runnerTimer = setTimeout(checkRunner, 350);
 });
@@ -909,6 +945,38 @@ el("discrete-default").addEventListener("change", async () => {
 el("shortcut-menu").addEventListener("change", updateShortcuts);
 el("shortcut-desktop").addEventListener("change", updateShortcuts);
 el("play").addEventListener("click", () => perform("play"));
+el("compress").addEventListener("click", () => {
+  if (confirm("Compress this game for Batocera? It can't be tested or changed in Winebundle afterwards.")) {
+    perform("compress");
+  }
+});
+// Batocera has several Wine versions; the game should use the one Batocera launches it with.
+function setupBatocera() {
+  const batocera = defaults.batocera;
+  el("runner-choice-field").hidden = !batocera;
+  if (!batocera) return;
+  el("runner-choice").replaceChildren(...batocera.runners.map(runner => new Option(
+    runner.name + (runner.custom ? " (added by you)" : ""), runner.path)),
+    new Option("Another Wine executable", ""));
+  el("runner-help").textContent = "Batocera launches the game with the version chosen here. " +
+    "Winebundle sets it in the game's Batocera settings when you save.";
+  el("welcome-finish").textContent = "Winebundle installs the game in its own Wine " +
+    "environment, then asks you to try it. Once you confirm it works, the game appears in " +
+    "Batocera's Windows menu, ready to play with your controller.";
+}
+function syncRunnerChoice() {
+  if (!defaults.batocera) return;
+  const value = el("runner").value.trim();
+  el("runner-choice").value = defaults.batocera.runners.some(runner => runner.path === value) ? value : "";
+}
+el("runner-choice").addEventListener("change", () => {
+  if (!el("runner-choice").value) {
+    el("runner").focus();
+    return;
+  }
+  el("runner").value = el("runner-choice").value;
+  checkRunner();
+});
 // Shown where the window has no title bar, such as on Batocera. The app asks first if
 // an install or test is still running.
 el("quit").addEventListener("click", () => {
@@ -920,6 +988,10 @@ el("remove-open").addEventListener("click", () => {
   el("remove-title").textContent = `Remove ${config.name}?`;
   el("remove-text").textContent = !config.prepared && !existing ?
     "Nothing has been installed yet. This removes the unfinished setup." :
+    config.prefix ?
+    `This removes ${config.name} from Batocera's Windows menu and deletes its ` +
+    `${config.compressed ? "compressed file" : "folder"}${existing ? "" : ", including the installed game"}` +
+    `${config.compressed ? "" : " and any saves or settings stored in it"}. This can't be undone.` :
     `This deletes ${config.name}'s Wine environment${existing ? "" : ", including the installed game"}, ` +
     "any saves or settings stored in it, and its launcher and shortcuts. This can't be undone.";
   el("remove-kept").textContent = existing ?
@@ -1017,6 +1089,7 @@ document.addEventListener("drop", event => {
     defaults = session.local || defaults;
     el("builder-link").hidden = !session.builder;
     el("quit").hidden = !session.quit;
+    setupBatocera();
     const [saved] = await Promise.all([api("/api/preferences"), refresh(), loadSystem()]);
     preferences = saved;
     renderGraphicsDefault();

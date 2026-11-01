@@ -1,0 +1,68 @@
+{
+    "actions_player1": [
+        {
+            "trigger": ["hotkey", "start"],
+            "type": "exec",
+            "target": "python3 /userdata/system/winebundle/gui/winebundle_app.py --quit"
+        },
+        {
+            "trigger": "up",
+            "type": "key",
+            "target": ["KEY_LEFTSHIFT", "KEY_TAB"]
+        },
+        {
+            "trigger": "down",
+            "type": "key",
+            "target": "KEY_TAB"
+        },
+        {
+            "trigger": "left",
+            "type": "key",
+            "target": "KEY_LEFT"
+        },
+        {
+            "trigger": "right",
+            "type": "key",
+            "target": "KEY_RIGHT"
+        },
+        {
+            "trigger": "a",
+            "type": "key",
+            "target": "KEY_ENTER"
+        },
+        {
+            "trigger": "b",
+            "type": "key",
+            "target": "KEY_ESC"
+        },
+        {
+            "trigger": "x",
+            "type": "key",
+            "target": "KEY_SPACE"
+        },
+        {
+            "trigger": "pageup",
+            "type": "key",
+            "target": "KEY_PAGEUP"
+        },
+        {
+            "trigger": "pagedown",
+            "type": "key",
+            "target": "KEY_PAGEDOWN"
+        },
+        {
+            "trigger": "joystick1",
+            "type": "mouse"
+        },
+        {
+            "trigger": "r2",
+            "type": "key",
+            "target": "BTN_LEFT"
+        },
+        {
+            "trigger": "l2",
+            "type": "key",
+            "target": "BTN_RIGHT"
+        }
+    ]
+}

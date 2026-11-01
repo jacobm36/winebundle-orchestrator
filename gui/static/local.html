@@ -64,7 +64,7 @@
             <span class="welcome-number" aria-hidden="true">3</span>
             <h3>Test, save and play</h3>
           </div>
-          <p class="muted">Winebundle installs the game in its own Wine environment, then asks you to try it.
+          <p id="welcome-finish" class="muted">Winebundle installs the game in its own Wine environment, then asks you to try it.
             Once you confirm it works, the game joins your library with an application menu shortcut, ready to play.</p>
         </li>
       </ol>
@@ -171,6 +171,8 @@
           <details id="options">
             <summary>Wine and compatibility options</summary>
             <div class="grid advanced-fields">
+              <label id="runner-choice-field" class="wide" hidden>Wine version
+                <select id="runner-choice"></select></label>
               <div class="wide field">
                 <label for="runner">Wine executable</label>
                 <div class="path-row">
@@ -239,6 +241,17 @@
           <legend>Graphics card</legend>
           <label class="check"><input id="game-discrete" type="checkbox"> Use the <strong id="game-discrete-name"></strong></label>
           <p id="graphics-status" class="field-status" role="status"></p>
+        </fieldset>
+        <fieldset id="batocera" class="option-group" hidden>
+          <legend>Batocera</legend>
+          <p id="batocera-text"></p>
+          <div id="compress-group" hidden>
+            <p class="muted">Compressing packs the game into one .wsquashfs file, which saves space.
+              Batocera keeps your saves and settings separately. The game can't be tested
+              or changed in Winebundle afterwards.</p>
+            <button id="compress" class="secondary" type="button">Compress for Batocera</button>
+          </div>
+          <p id="batocera-status" class="field-status" role="status"></p>
         </fieldset>
         <div class="actions finish-actions">
           <button id="save" type="button" disabled>It works — save game</button>

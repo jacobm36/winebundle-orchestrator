@@ -1,15 +1,16 @@
-# Winebundle on Batocera — paused plan
+# Winebundle on Batocera
 
-**Status:** Check script run on 2026-10-31. See **Check results** below.
+**Status:** Batocera mode is built and tested on the laptop. It is waiting for a first
+test on the Batocera machine. See **First test on the machine** below.
 **Goal:** Run the Winebundle app itself on Batocera 43 (x86 PC), so games can be added
 from the TV. Games it adds should appear in Batocera's own **Windows** menu.
 
 ## Decisions so far
 
 - **No fork.** This repo stays the one project. Batocera support is an extra mode.
-- **Packaging:** an **AppImage** (one compressed file with Python, GTK and WebKit
-  bundled), started from Batocera's **Ports** menu. `.wsquashfs` is Batocera's format for
-  *games*, not apps, so it is only used for exported games.
+- **Packaging:** plain files in `/userdata/system/winebundle/`, run by Batocera's own
+  Python and started from the **Ports** menu. (An AppImage was planned, but Batocera
+  already has GTK and WebKit.) `.wsquashfs` is Batocera's format for *games*, not apps.
 - **Rejected for now:** running Winebundle as a network server controlled from a phone
   or laptop. That needs extra security work. It can be revisited later.
 
@@ -50,76 +51,105 @@ Full output: [batocera-probe-output.txt](batocera-probe-output.txt).
 - **glibc 2.40, FUSE available, 204 GB free on `/userdata`.**
 - **Ports launchers** are plain `.sh` files in `/userdata/roms/ports/`.
 
-## Revised next steps
+## Batocera mode (built 2026-10-31, not yet tried on the machine)
 
-1. **Quick try, no code changes:** copy the project to `/userdata/system/winebundle/`
-   and start it on the TV (from SSH with `DISPLAY=:0`, or from a Ports script) to see if
-   the window opens and works.
-2. **Find the Wine layout:** list `bin/` in each Wine folder, so Batocera mode can offer
-   them instead of `/usr/bin/wine`.
-   - **Tried on 2026-10-31:** the window opened on the TV, so no AppImage is needed.
-     It couldn't be closed: Batocera's Openbox draws no title bar, and stopping it over
-     SSH didn't work. Fixed since: on Batocera it opens maximized with a **Quit**
-     button, `--quit` closes it, and it shuts down cleanly when stopped. To try again,
-     copy the files again, then start it with
-     `ssh -t root@batocera.local DISPLAY=:0 python3 /userdata/system/winebundle/gui/winebundle_app.py`
-     (`-t` lets Ctrl+C in that terminal close it). From another terminal:
-     `ssh root@batocera.local python3 /userdata/system/winebundle/gui/winebundle_app.py --quit`.
-   - **Confirmed on Batocera (2026-10-31):** the updated window opens, and Ctrl+C over
-     `ssh -t` closes it. The Quit button also closes it.
-   - Still to do: closing with the controller (Hotkey + Start) from a Ports launcher's
-     `.keys` file.
-3. Then continue with Batocera mode (step 3 below), skipping the AppImage (step 1 below)
-   unless the quick try fails.
+Winebundle switches to Batocera mode by itself when
+`/usr/share/batocera/batocera.version` exists. No AppImage is needed: Batocera's own
+Python, GTK 3 and WebKit2 4.1 run the normal window.
 
-## Step 1 when resuming: run the check script (done)
+Decisions made with Jake:
 
-The script only reads information and changes nothing:
-[packaging/batocera/batocera-probe.sh](../packaging/batocera/batocera-probe.sh).
+- **Wine:** offer only the builds Batocera can launch: `wine-proton` (the default),
+  `wine-tkg`, and any folder in `/userdata/system/wine/custom/`. The game is set up with
+  the same Wine that Batocera launches it with, so Batocera doesn't upgrade the prefix.
+- **Storage:** each game is installed straight into `/userdata/roms/windows/<Name>.wine/`,
+  which is its Wine prefix. Names that are taken get ` (2)`, ` (3)`, ….
+- **Compress:** a **Compress for Batocera** button on a finished game makes
+  `<Name>.wsquashfs` (`mksquashfs … -comp zstd`) and deletes the folder.
+- **Ports entry:** Winebundle is started from **Ports → Winebundle**.
+
+What it does:
+
+- **Save** (the "It works" button) writes `autorun.cmd` (`DIR=` relative to the prefix,
+  `CMD=` shell-quoted, LF endings). It sets
+  `windows["<Name>.wine"].wine-runner` with `batocera-settings-set` and asks
+  EmulationStation to reload its game list (`http://127.0.0.1:1234/reloadgames`).
+  If the game was tested with a Wine build Batocera can't use, the Finish step says so.
+- **Compress** sets the Wine version again for the `.wsquashfs` name and reloads the list.
+  Compressed games can't be tested or changed in Winebundle any more.
+- **Remove** deletes the game's folder or `.wsquashfs` and reloads the list. A game
+  added with "An installed game" keeps its own folder.
+- **Hidden on Batocera:** Winebundle's Play button, menu and desktop shortcuts, and the
+  graphics card option. The system check skips desktop-only checks and never suggests
+  `apt` commands.
+- Wine is started with the same library paths that `batocera-wine` sets.
+- The file picker offers Windows installers, Windows games, Userdata and USB drives.
+- **Controller** ([Winebundle.sh.keys](../packaging/batocera/Winebundle.sh.keys)):
+  D-pad up/down moves between controls (Shift+Tab/Tab), left/right are arrow keys, A is
+  Enter, B is Esc, X is Space, L1/R1 are Page Up/Down, the left stick moves the mouse,
+  R2 clicks, L2 right-clicks, **Hotkey + Start closes Winebundle**.
+
+### Install or update on Batocera
+
+From this checkout on the laptop (the password is `linux`):
 
 ```sh
-scp packaging/batocera/batocera-probe.sh root@batocera.local:/userdata/
-ssh root@batocera.local sh /userdata/batocera-probe.sh
+make batocera                    # or: make batocera BATOCERA=root@192.168.x.x
 ```
 
-The default login is `root` / `linux`. If `batocera.local` doesn't connect, use the IP
-address from **Network Settings**. Save the output (for example as
-`docs/batocera-probe-output.txt`) and share it.
+This copies `gui`, `lib`, `data`, `VERSION` and `packaging/batocera` to
+`/userdata/system/winebundle/`, then puts `Winebundle.sh` and its `.keys` file in
+`/userdata/roms/ports/` and reloads the game list. Run it again after any change.
 
-Questions the output answers:
+### First test on the machine
 
-| Question | Why it matters |
+1. Open **Ports → Winebundle**. Check that the controller moves between controls and
+   that **Hotkey + Start** closes it.
+2. Open **System check**: Wine should be `wine-proton`, with no errors.
+3. Add a small game you already know works (an installer from
+   `/userdata/roms/windows_installers` is ideal). Install, test, then select
+   **It works — save game**.
+4. Back in Batocera, open the **Windows** menu: the game should be listed. Launch it.
+5. Try **Compress for Batocera** on it, then launch the `.wsquashfs` from the menu.
+6. If anything fails, open **Activity log and troubleshooting** in Winebundle, or copy
+   `/userdata/system/.local/share/winebundle/local/<game>/activity.log`, and share it.
+   To start Winebundle from the laptop and see its output instead:
+   `ssh -t root@batocera.local DISPLAY=:0 python3 /userdata/system/winebundle/gui/winebundle_app.py`.
+
+Not known until tested: whether Wine starts correctly from Winebundle with the copied
+library paths, whether evmapy applies the `.keys` file to the Ports script, and whether
+A/B match Jake's controller.
+
+### Still to do
+
+- Typing (game names, file paths) with only a controller: an on-screen keyboard.
+- Larger buttons and focus styling for the TV.
+- **Export for Batocera** from the desktop app: write `autorun.cmd` and make a
+  `.wsquashfs` to copy across. It can reuse `batocera.autorun` and
+  `batocera.compress_command`.
+
+### History
+
+- The probe script ([packaging/batocera/batocera-probe.sh](../packaging/batocera/batocera-probe.sh))
+  was run on 2026-10-31. An AppImage turned out to be unnecessary.
+- The first run on the TV couldn't be closed, because Batocera's Openbox draws no title
+  bar. Fixed: on Batocera the window opens maximized with a **Quit** button,
+  `winebundle_app.py --quit` closes it, and Ctrl+C over `ssh -t` works (confirmed).
+
+## Wine builds on Batocera (2026-10-31)
+
+All three have `bin/wine` and `bin/wineserver`, so Winebundle's existing Wine check
+accepts them without changes:
+
+| Path | Notes |
 | --- | --- |
-| Wayland or X11? | How the AppImage window opens (GDK backend). |
-| Python, GTK, WebKit present? | What the AppImage must bundle (likely all of it). |
-| glibc version | The AppImage must be built on an older or equal glibc. |
-| FUSE available? | Whether the AppImage runs directly or needs `--appimage-extract-and-run`. |
-| Wine locations | Where Winebundle should look instead of `/usr/bin/wine`. |
-| `mksquashfs` present? | Whether `.wsquashfs` files can be made on the Batocera machine. |
-| `/userdata/roms/windows`, `ports` | Where to write games and the launcher. |
+| `/usr/wine/wine-tkg/bin/wine` | Ships with Batocera. Minimal tools (no `wine64`). |
+| `/usr/wine/wine-proton/bin/wine` | Ships with Batocera. Has `wine64` and preloaders. |
+| `/userdata/system/wine/custom/wine-11.16/bin/wine` | Added by the user; survives updates. |
 
-## Steps after that
-
-1. **AppImage build:** add `packaging/build-appimage.sh` and a `make appimage` target.
-   Bundle Python, GTK 3 and WebKitGTK 4.1 (expect about 100–150 MB). Test it on this
-   laptop first.
-2. **Ports launcher:** a small `Winebundle.sh` in `/userdata/roms/ports/` that starts the
-   AppImage. Keep the AppImage and app data under `/userdata/system/winebundle/`.
-3. **Batocera mode** (detected automatically on Batocera):
-   - Use Batocera's Wine instead of `/usr/bin/wine` (paths come from the check output).
-   - Install games into `/userdata/roms/windows/<Name>.wine/` and write `autorun.cmd`
-     from the chosen EXE (relative `DIR`, quoted `CMD`).
-   - Skip the menu and desktop shortcut options, and hide Winebundle's own launch
-     button. Batocera's menu launches the games.
-   - Optional "Compress for Batocera" action that makes a `.wsquashfs`.
-   - Tell the user to refresh the game list (or trigger it if Batocera has an API for it).
-4. **Controller and TV use:** larger targets, keyboard and gamepad focus order, and a way
-   to type with an on-screen keyboard. This is the most uncertain part and needs
-   testing on the TV.
-5. **Export from the desktop app (also useful on its own):** an "Export for Batocera"
-   button on a finished game. It writes `autorun.cmd` and makes a `.wsquashfs` to copy to
-   `/userdata/roms/windows/`. This reuses most of step 3 and can be built without the
-   Batocera machine. It is a good first job if work resumes before the machine is back.
+`batocera-wine` only launches `wine-tkg` and `wine-proton` from `/usr/wine`, plus anything
+in `/userdata/system/wine/custom/`, so Batocera mode lists exactly those. It falls back to
+`wine-tkg` when a game has no `wine-runner` setting, which is why Winebundle sets one.
 
 ## Graphics card: Batocera decides
 
@@ -134,15 +164,17 @@ Batocera must not set these variables in `autorun.cmd` either.
 - [lib/batocera_import.py](../lib/batocera_import.py) — existing Batocera import logic and
   folder knowledge.
 - [lib/local_setup.py](../lib/local_setup.py) — game setup, installer detection, EXE choice.
-- [lib/system_check.py](../lib/system_check.py) — Wine and system checks. Needs a Batocera
+- [lib/batocera.py](../lib/batocera.py) — Batocera mode: Wine builds and their
+  environment, folder names, `autorun.cmd`, settings, game list reload, squashfs.
+- [lib/system_check.py](../lib/system_check.py) — Wine and system checks, with a Batocera
   branch.
-- [gui/winebundle_app.py](../gui/winebundle_app.py) — GTK/WebKit window (the AppImage
-  entry point).
+- [gui/winebundle_app.py](../gui/winebundle_app.py) — GTK/WebKit window.
+- [packaging/batocera/](../packaging/batocera/) — Ports launcher, controller mapping,
+  installer and probe script.
+- [tests/test_batocera.py](../tests/test_batocera.py) — Batocera mode tests.
 - [gui/winebundle_gui.py](../gui/winebundle_gui.py) — local server and API.
-- [packaging/build-deb.sh](../packaging/build-deb.sh) — existing packaging to model the
-  AppImage build on.
 
 ## Prompt to resume with
 
-> We paused Batocera support for Winebundle. Read `docs/BATOCERA-PLAN.md`. Here is the
-> output of `batocera-probe.sh` from my Batocera 43 machine: …
+> We're continuing Batocera support for Winebundle. Read `docs/BATOCERA-PLAN.md`. I ran
+> `make batocera` and tried the first test on the machine. Here is what happened: …

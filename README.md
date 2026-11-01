@@ -413,6 +413,31 @@ by each **Browse...** field are stored in
 `~/.local/share/winebundle/local/preferences.json`, so they survive restarts
 and are shared with the web GUI.
 
+## Running on Batocera
+
+Winebundle also runs on [Batocera](https://batocera.org) 43 (x86 PC), using Batocera's
+own Python, GTK and WebKit. Install or update it from a checkout on another computer:
+
+```bash
+make batocera          # copies to root@batocera.local; password "linux"
+```
+
+Then start it from **Ports → Winebundle**. Hotkey + Start closes it, and the D-pad, A
+and B move around and select. It detects Batocera by itself and changes how games are
+set up:
+
+- Only Batocera's Wine builds are offered (`wine-proton` by default, `wine-tkg`, and
+  anything in `/userdata/system/wine/custom/`).
+- Each game is installed into `/userdata/roms/windows/<Name>.wine/`. Saving it writes
+  `autorun.cmd`, sets its Wine version in Batocera's settings, and refreshes the game
+  list, so the game appears in Batocera's **Windows** menu.
+- **Compress for Batocera** turns a finished game into a single `.wsquashfs` file.
+- Batocera launches the games, so Winebundle's Play button, shortcuts and graphics card
+  option are hidden.
+
+This mode hasn't been tried on a Batocera machine yet. See
+[docs/BATOCERA-PLAN.md](docs/BATOCERA-PLAN.md) for details and a test checklist.
+
 ## Local web GUI
 
 The same interface also runs in a normal web browser. Start the

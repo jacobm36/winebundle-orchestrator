@@ -13,6 +13,7 @@ import threading
 import unicodedata
 from pathlib import Path
 
+import batocera
 import graphics
 from winebundle_config import ConfigError
 
@@ -182,6 +183,9 @@ def check_runner(value):
 
 
 def default_runner():
+    if batocera.active():
+        found = batocera.runners()
+        return found[0]["path"] if found else ""
     for candidate in ("/usr/bin/wine", shutil.which("wine")):
         if candidate and not check_runner(candidate)["error"]:
             return candidate
@@ -227,6 +231,14 @@ def places():
     for media in (Path("/media") / user, Path("/run/media") / user):
         try:
             found += [(drive.name, drive) for drive in sorted(media.iterdir())]
+        except OSError:
+            pass
+    if batocera.active():
+        found = [("Windows installers", batocera.ROMS.parent / "windows_installers"),
+                 ("Windows games", batocera.ROMS), ("Userdata", Path("/userdata"))]
+        # Batocera mounts USB drives straight under /media.
+        try:
+            found += [(drive.name, drive) for drive in sorted(Path("/media").iterdir())]
         except OSError:
             pass
     found.append(("Computer", Path("/")))
@@ -275,20 +287,32 @@ def browse(path, kind="installer", hidden=False):
 
 
 class LocalSetup:
-    def __init__(self, root=None):
+    def __init__(self, root=None, batocera_mode=None):
         self.root = Path(root or Path.home() / ".local/share/winebundle/local")
         self.lock = threading.Lock()
         self.active = None
         self.jobs = {}
         self.process = None
-        self.detect = graphics.discrete_gpu
+        # On Batocera, games live in its Windows folder and launch from its menu.
+        self.batocera = batocera.active() if batocera_mode is None else batocera_mode
+        self.roms = batocera.ROMS
+        managed = self.batocera or graphics.system_managed()
+        self.detect = (lambda: None) if managed else graphics.discrete_gpu
         # Leave inherited graphics settings alone where the system chooses the card.
-        self.graphics_variables = () if graphics.system_managed() else graphics.VARIABLES
+        self.graphics_variables = () if managed else graphics.VARIABLES
 
     def _directory(self, game_id):
         if not isinstance(game_id, str) or len(game_id) > 64 or not GAME_ID.fullmatch(game_id):
             raise ConfigError("invalid local game ID")
         return self.root / game_id
+
+    def _prefix(self, game_id, config):
+        prefix = config.get("prefix")
+        if prefix:
+            if Path(prefix).suffix != ".wine" or not batocera.managed_path(prefix, self.roms):
+                raise ConfigError("this game's Wine folder is outside Batocera's Windows folder")
+            return Path(prefix)
+        return self._directory(game_id) / "prefix"
 
     def _read(self, game_id):
         try:
@@ -378,14 +402,32 @@ class LocalSetup:
             stream.seek(max(0, stream.tell() - 65536))
             job["log"] = stream.read().decode("utf-8", errors="replace")
         candidates, recommended = [], ""
+        drive = self._prefix(game_id, config) / "drive_c"
         if job["status"] != "running":
-            candidates, recommended = self._executables(directory / "prefix/drive_c", config)
+            candidates, recommended = self._executables(drive, config)
         return {"config": config, **job, "executables": candidates,
                 "recommendedExecutable": recommended,
                 "shortcuts": self._shortcut_status(config),
                 "graphics": self._graphics_status(config),
-                "drive": str(directory / "prefix/drive_c"),
+                "batocera": self._batocera_status(game_id, config),
+                "drive": str(drive),
                 "directory": str(directory)}
+
+    def _batocera_status(self, game_id, config):
+        if not self.batocera and not config.get("prefix"):
+            return None
+        prefix = self._prefix(game_id, config) if config.get("prefix") else None
+        compressed = config.get("compressed") or ""
+        entry = config.get("entrypoint") or ""
+        compressible = bool(
+            config.get("accepted") and prefix and not compressed and prefix.is_dir()
+            and entry and batocera.inside(entry, prefix) and shutil.which("mksquashfs"))
+        return {"folder": str(prefix or ""), "compressed": compressed,
+                "menuName": Path(compressed).stem if compressed else
+                (prefix.stem if prefix else ""),
+                "runner": batocera.runner_name(config.get("runner", "")),
+                "compressible": compressible,
+                "outside": bool(prefix and entry and not batocera.inside(entry, prefix))}
 
     @staticmethod
     def _executables(drive, config):
@@ -510,6 +552,12 @@ class LocalSetup:
             else:
                 raise ConfigError("too many setups share this game name")
             config["id"] = game_id
+            if self.batocera:
+                try:
+                    config["prefix"] = str(batocera.new_prefix(config["name"], self.roms))
+                except OSError as exc:
+                    self._directory(game_id).rmdir()
+                    raise ConfigError(f"cannot create the game in {self.roms}: {exc}") from exc
             self._write(game_id, config)
         return game_id
 
@@ -535,18 +583,35 @@ class LocalSetup:
                 if shortcut.name == filename and (shortcut.is_file() or shortcut.is_symlink()):
                     shortcut.unlink()
             server = config.get("wineserver")
-            if server and (directory / "prefix").is_dir():
+            try:
+                prefix = self._prefix(game_id, config)
+            except ConfigError:
+                prefix = None
+            if server and prefix and prefix.is_dir():
                 # A game started from a shortcut may still be using this prefix.
                 env = {key: value for key, value in os.environ.items()
                        if not key.startswith("WINE")}
-                env["WINEPREFIX"] = str(directory / "prefix")
+                if self.batocera:
+                    env.update(batocera.wine_environment(config.get("runner", server)))
+                env["WINEPREFIX"] = str(prefix)
                 try:
                     subprocess.run([server, "-k"], env=env, timeout=15, check=False,
                                    stdin=subprocess.DEVNULL, capture_output=True)
                 except (OSError, subprocess.SubprocessError):
                     pass
+            listed = False
+            if prefix and config.get("prefix") and prefix.is_dir():
+                _remove_tree(prefix)
+                listed = True
+            compressed = Path(config.get("compressed") or "")
+            if (compressed.suffix == ".wsquashfs" and batocera.managed_path(compressed, self.roms)
+                    and compressed.is_file()):
+                compressed.unlink()
+                listed = True
             _remove_tree(directory)
             self.jobs.pop(game_id, None)
+            if listed:
+                batocera.reload_games()
             return {"removed": game_id, "name": config.get("name") or game_id,
                     "kept": config.get("source", "") if config.get("mode") == "existing"
                     else ""}
@@ -566,20 +631,33 @@ class LocalSetup:
         for key in ("WINEPREFIX", "WINEARCH", "WINEDLLOVERRIDES", "WINELOADER",
                     "WINESERVER", "DXVK_FILTER_DEVICE_NAME") + self.graphics_variables:
             env.pop(key, None)
-        env.update(WINEPREFIX=str(self._directory(game_id) / "prefix"),
+        env.update(WINEPREFIX=str(self._prefix(game_id, config)),
                    WINEDEBUG="-all", WINESERVER=config["wineserver"])
+        if self.batocera:
+            env.update(batocera.wine_environment(config["runner"]))
         if config["gpu"]:
             env["DXVK_FILTER_DEVICE_NAME"] = config["gpu"]
         env.update(self._graphics_status(config)["env"])
         return env
 
     def start(self, game_id, action, values):
-        if action not in ("prepare", "test", "play"):
+        if action not in ("prepare", "test", "play", "compress"):
             raise ConfigError("unknown local operation")
         with self.lock:
             if self.active:
                 raise ConfigError("another local operation is running")
             config = self._read(game_id)
+            if config.get("compressed"):
+                raise ConfigError("this game is compressed for Batocera; play it from "
+                                  "Batocera's Windows menu")
+            if action == "compress":
+                status = self._batocera_status(game_id, config)
+                if not status or not status["compressible"]:
+                    raise ConfigError("only saved Batocera games installed in their own "
+                                      "Wine folder can be compressed")
+                target = self._prefix(game_id, config).with_suffix(".wsquashfs")
+                if target.exists():
+                    raise ConfigError(f"{target.name} already exists in {target.parent}")
             if action == "prepare" and config["prepared"]:
                 raise ConfigError("this setup is already prepared")
             if action == "play":
@@ -618,6 +696,8 @@ class LocalSetup:
     def _run(self, game_id, action, config):
         directory = self._directory(game_id)
         env = self._environment(game_id, config)
+        compressed = (self._prefix(game_id, config).with_suffix(".wsquashfs")
+                      if action == "compress" else None)
         error = ""
         try:
             with (directory / "activity.log").open("a", buffering=1) as log:
@@ -656,7 +736,8 @@ class LocalSetup:
                             ("x64", "system32"), ("x32", "syswow64")]
                         for platform, system in platforms:
                             for dll in ("d3d11", "dxgi"):
-                                target = directory / "prefix/drive_c/windows" / system / f"{dll}.dll"
+                                target = (self._prefix(game_id, config) / "drive_c/windows"
+                                          / system / f"{dll}.dll")
                                 target.unlink(missing_ok=True)
                                 shutil.copyfile(Path(config["dxvk"]) / platform / f"{dll}.dll",
                                                 target)
@@ -676,12 +757,27 @@ class LocalSetup:
                             raise ConfigError("operation stopped by user")
                         config["prepared"] = True
                         self._write(game_id, config)
+                elif action == "compress":
+                    prefix = self._prefix(game_id, config)
+                    run(batocera.compress_command(prefix, compressed), directory)
+                    with self.lock:
+                        if self.jobs[game_id].get("cancelled"):
+                            raise ConfigError("operation stopped by user")
+                        config["compressed"] = str(compressed)
+                        self._write(game_id, config)
+                    # Batocera would list both, so the compressed file replaces the folder.
+                    _remove_tree(prefix)
+                    batocera.set_runner(compressed.name, batocera.runner_name(config["runner"]))
+                    batocera.reload_games()
+                    log.write(f"Compressed to {compressed}\n")
                 else:
                     run([config["runner"], config["entrypoint"]] + config["args"],
                         Path(config["entrypoint"]).parent)
                     run([config["wineserver"], "-w"], directory)
         except (ConfigError, OSError, subprocess.SubprocessError) as exc:
             error = str(exc)
+            if compressed and not config.get("compressed"):
+                compressed.unlink(missing_ok=True)
             with (directory / "activity.log").open("a") as log:
                 log.write(f"\nERROR: {error}\n")
                 try:
@@ -711,6 +807,16 @@ class LocalSetup:
             if (accepted is not True or job.get("action") != "test"
                     or job.get("status") != "finished"):
                 raise ConfigError("complete a test and confirm gameplay works before saving")
+            if config.get("prefix"):
+                prefix = self._prefix(game_id, config)
+                batocera.write_autorun(prefix, config["entrypoint"], config["args"])
+                config.update(accepted=True, launcher="", desktop="", desktopShortcut="",
+                              batoceraRunner=batocera.set_runner(
+                                  prefix.name, batocera.runner_name(config["runner"])))
+                self._write(game_id, config)
+                batocera.reload_games()
+                return {"launcher": "", "desktop": "", "desktopShortcut": "",
+                        "batocera": prefix.stem}
             if desktop and not desktop_folder():
                 raise ConfigError("no desktop folder was found for a desktop shortcut")
             script = self._write_launcher(game_id, config)
