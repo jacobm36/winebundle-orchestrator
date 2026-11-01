@@ -13,6 +13,7 @@
     <nav aria-label="Main navigation">
       <button id="home" class="nav-link" type="button">Game library</button>
       <button id="system-open" class="nav-link" type="button">System check</button>
+      <button id="quit" class="nav-link" type="button" hidden>Quit</button>
     </nav>
   </header>
   <main>
@@ -111,6 +112,12 @@
       <p id="system-summary" role="status">Checking this computer...</p>
       <p id="system-distro" class="muted"></p>
       <ul id="system-checks" class="system-checks"></ul>
+      <fieldset id="graphics-default" class="option-group" hidden>
+        <legend>Graphics card for games</legend>
+        <label class="check"><input id="discrete-default" type="checkbox"> Use the <strong id="discrete-default-name"></strong></label>
+        <p class="muted">Games run much faster on it, but it uses more battery. You can change this for each game on its Finish step.</p>
+        <p id="discrete-default-status" class="field-status" role="status"></p>
+      </fieldset>
       <p class="muted">Commands need your administrator password. Run them in a terminal, then select <strong>Check again</strong>.</p>
     </div>
     <div id="workspace" hidden>
@@ -222,11 +229,16 @@
       <section data-panel="4" hidden>
         <h2 id="finish-title">Did the game work?</h2>
         <p id="finish-help"></p>
-        <fieldset id="shortcuts">
+        <fieldset id="shortcuts" class="option-group">
           <legend>Shortcuts</legend>
           <label class="check"><input id="shortcut-menu" type="checkbox" checked> Application menu</label>
           <label class="check"><input id="shortcut-desktop" type="checkbox"> Desktop</label>
           <p id="shortcut-status" class="field-status" role="status"></p>
+        </fieldset>
+        <fieldset id="graphics" class="option-group" hidden>
+          <legend>Graphics card</legend>
+          <label class="check"><input id="game-discrete" type="checkbox"> Use the <strong id="game-discrete-name"></strong></label>
+          <p id="graphics-status" class="field-status" role="status"></p>
         </fieldset>
         <div class="actions finish-actions">
           <button id="save" type="button" disabled>It works — save game</button>

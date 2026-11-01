@@ -235,6 +235,12 @@ change the **Shortcuts** checkboxes on the Finish step. Changes apply
 immediately and don't require another test. This also works for games saved
 before desktop shortcuts were available.
 
+On a laptop with two graphics cards, games use the discrete card (for
+example NVIDIA) by default, including from shortcuts. To use the built-in
+graphics for one game instead, clear **Use the ...** under **Graphics card** on
+its Finish step. To change the default for all games, use **Graphics card for
+games** on the **System check** page.
+
 Each setup keeps these files in `~/.local/share/winebundle/local/<id>/`,
 where `<id>` is the readable folder name (or a hexadecimal ID for older setups):
 

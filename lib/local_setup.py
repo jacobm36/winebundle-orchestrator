@@ -13,6 +13,7 @@ import threading
 import unicodedata
 from pathlib import Path
 
+import graphics
 from winebundle_config import ConfigError
 
 
@@ -280,6 +281,7 @@ class LocalSetup:
         self.active = None
         self.jobs = {}
         self.process = None
+        self.detect = graphics.discrete_gpu
 
     def _directory(self, game_id):
         if not isinstance(game_id, str) or len(game_id) > 64 or not GAME_ID.fullmatch(game_id):
@@ -309,18 +311,21 @@ class LocalSetup:
         if not isinstance(folders, dict):
             folders = {}
         return {"systemChecked": stored.get("systemChecked") is True,
+                "discreteGpu": stored.get("discreteGpu") is not False,
                 "pickerFolders": {kind: path for kind, path in folders.items()
                                   if kind in PICKER_KINDS and isinstance(path, str)}}
 
     def set_preferences(self, values):
-        if not isinstance(values, dict) or set(values) - {"systemChecked", "pickerFolders"}:
+        if not isinstance(values, dict) or set(values) - {"systemChecked", "discreteGpu",
+                                                          "pickerFolders"}:
             raise ConfigError("unknown preference")
         with self.lock:
             current = self.preferences()
-            if "systemChecked" in values:
-                if not isinstance(values["systemChecked"], bool):
-                    raise ConfigError("systemChecked must be true or false")
-                current["systemChecked"] = values["systemChecked"]
+            for key in ("systemChecked", "discreteGpu"):
+                if key in values:
+                    if not isinstance(values[key], bool):
+                        raise ConfigError(f"{key} must be true or false")
+                    current[key] = values[key]
             folders = values.get("pickerFolders", {})
             if not isinstance(folders, dict):
                 raise ConfigError("pickerFolders must be an object")
@@ -334,6 +339,8 @@ class LocalSetup:
             temporary = path.with_suffix(".tmp")
             temporary.write_text(json.dumps(current, indent=2) + "\n")
             temporary.replace(path)
+            if "discreteGpu" in values:
+                self._refresh_launchers()
             return current
 
     def busy(self):
@@ -374,6 +381,7 @@ class LocalSetup:
         return {"config": config, **job, "executables": candidates,
                 "recommendedExecutable": recommended,
                 "shortcuts": self._shortcut_status(config),
+                "graphics": self._graphics_status(config),
                 "drive": str(directory / "prefix/drive_c"),
                 "directory": str(directory)}
 
@@ -541,15 +549,26 @@ class LocalSetup:
                     "kept": config.get("source", "") if config.get("mode") == "existing"
                     else ""}
 
+    def _graphics_status(self, config):
+        """Which card this game uses. A game's own choice overrides the app-wide default."""
+        card = self.detect()
+        choice = config.get("discreteGpu")
+        default = self.preferences()["discreteGpu"]
+        use = card is not None and (default if choice is None else choice)
+        return {"available": card is not None, "name": card["name"] if card else "",
+                "discrete": bool(use), "choice": choice, "default": default,
+                "env": card["env"] if use else {}}
+
     def _environment(self, game_id, config):
         env = os.environ.copy()
         for key in ("WINEPREFIX", "WINEARCH", "WINEDLLOVERRIDES", "WINELOADER",
-                    "WINESERVER", "DXVK_FILTER_DEVICE_NAME"):
+                    "WINESERVER", "DXVK_FILTER_DEVICE_NAME") + graphics.VARIABLES:
             env.pop(key, None)
         env.update(WINEPREFIX=str(self._directory(game_id) / "prefix"),
                    WINEDEBUG="-all", WINESERVER=config["wineserver"])
         if config["gpu"]:
             env["DXVK_FILTER_DEVICE_NAME"] = config["gpu"]
+        env.update(self._graphics_status(config)["env"])
         return env
 
     def start(self, game_id, action, values):
@@ -692,25 +711,67 @@ class LocalSetup:
                 raise ConfigError("complete a test and confirm gameplay works before saving")
             if desktop and not desktop_folder():
                 raise ConfigError("no desktop folder was found for a desktop shortcut")
-            env = self._environment(game_id, config)
-            directory = self._directory(game_id)
-            script = directory / "play.sh"
-            assignments = {key: env[key] for key in ("WINEPREFIX", "WINESERVER", "WINEDEBUG")}
-            if config["gpu"]:
-                assignments["DXVK_FILTER_DEVICE_NAME"] = config["gpu"]
-            text = "#!/usr/bin/env bash\nset -euo pipefail\n"
-            text += "unset WINEARCH WINEDLLOVERRIDES WINELOADER DXVK_FILTER_DEVICE_NAME\n"
-            text += "".join(f"export {key}={shlex.quote(value)}\n" for key, value in assignments.items())
-            text += f"cd -- {shlex.quote(str(Path(config['entrypoint']).parent))}\n"
-            text += "exec " + shlex.join([config["runner"], config["entrypoint"]] + config["args"]) + ' "$@"\n'
-            script.write_text(text)
-            script.chmod(0o755)
+            script = self._write_launcher(game_id, config)
             config["accepted"] = True
             config["launcher"] = str(script)
             self._apply_shortcuts(game_id, config, menu, desktop)
             self._write(game_id, config)
             return {"launcher": str(script), "desktop": config["desktop"],
                     "desktopShortcut": config["desktopShortcut"]}
+
+    def _write_launcher(self, game_id, config):
+        env = self._environment(game_id, config)
+        script = self._directory(game_id) / "play.sh"
+        keys = ("WINEPREFIX", "WINESERVER", "WINEDEBUG", "DXVK_FILTER_DEVICE_NAME") + graphics.VARIABLES
+        assignments = {key: env[key] for key in keys if key in env}
+        text = "#!/usr/bin/env bash\nset -euo pipefail\n"
+        text += "unset " + " ".join(("WINEARCH", "WINEDLLOVERRIDES", "WINELOADER",
+                                     "DXVK_FILTER_DEVICE_NAME") + graphics.VARIABLES) + "\n"
+        text += "".join(f"export {key}={shlex.quote(value)}\n" for key, value in assignments.items())
+        text += f"cd -- {shlex.quote(str(Path(config['entrypoint']).parent))}\n"
+        text += "exec " + shlex.join([config["runner"], config["entrypoint"]] + config["args"]) + ' "$@"\n'
+        try:
+            if script.read_text() == text:
+                return script
+        except OSError:
+            pass
+        # Replace rather than rewrite, so a launcher that is running isn't changed under it.
+        temporary = script.with_suffix(".tmp")
+        temporary.write_text(text)
+        temporary.chmod(0o755)
+        temporary.replace(script)
+        return script
+
+    def _refresh_launchers(self):
+        for directory in sorted(self.root.iterdir()) if self.root.is_dir() else []:
+            if not GAME_ID.fullmatch(directory.name) or len(directory.name) > 64:
+                continue
+            try:
+                config = self._read(directory.name)
+                if config.get("accepted") and Path(config.get("launcher") or "").is_file():
+                    self._write_launcher(directory.name, config)
+            except (ConfigError, OSError, KeyError, TypeError):
+                continue
+
+    def refresh_launchers(self):
+        """Bring saved launchers up to date, such as after a graphics driver change."""
+        with self.lock:
+            self._refresh_launchers()
+
+    def set_graphics(self, game_id, discrete):
+        """Pick this game's card: True or False, or None to follow the app-wide default."""
+        if discrete is not None and not isinstance(discrete, bool):
+            raise ConfigError("graphics choice must be true, false or null")
+        with self.lock:
+            config = self._read(game_id)
+            if discrete is None:
+                config.pop("discreteGpu", None)
+            else:
+                config["discreteGpu"] = discrete
+            if config.get("accepted") and Path(config.get("launcher") or "").is_file():
+                self._write_launcher(game_id, config)
+            self._write(game_id, config)
+            return self._graphics_status(config)
 
     def shortcuts(self, game_id, menu, desktop):
         if not isinstance(menu, bool) or not isinstance(desktop, bool):

@@ -261,6 +261,19 @@ After saving, the same **Shortcuts** checkboxes (in **Setup & details**, on
 the Finish step) add or remove the menu and desktop shortcuts immediately,
 without another test. Removing shortcuts does not remove the game.
 
+**Graphics card:** on laptops with two graphics cards (such as Intel with
+NVIDIA or AMD), games use the more powerful discrete card by default. This
+applies to installs, tests, library Play, and the saved `play.sh` launcher, so
+menu and desktop shortcuts use it too. Change the default under **Graphics card
+for games** on the System check page, or for one game under **Graphics card**
+on its Finish step. Winebundle asks `switcheroo-control` which card to use and
+what settings it needs, the same way GNOME's "Launch using Discrete Graphics
+Card" does. Without it, Winebundle reads `/sys` and uses NVIDIA's PRIME
+render offload or Mesa's `DRI_PRIME`. Saved launchers are updated when
+Winebundle starts, so they follow driver changes. The option isn't shown on
+computers with one graphics card. The older **GPU name filter** option is
+separate: it only tells DXVK which card to use by name.
+
 **Store web installers:** Winebundle needs a game's offline installer.
 If the chosen file is a GOG Galaxy web installer (such as
 `GOG_Galaxy_<Game>.exe`) or a store app installer (Steam, Epic Games, EA app,
@@ -376,6 +389,11 @@ not affected.
   nothing is running. Games started with **Play** keep running. If an install
   or test is still running, Winebundle asks first, because closing loses that
   step's result (the installer or game itself keeps running).
+- **Without a title bar** (Batocera, or a plain window manager with no desktop
+  environment): Winebundle opens maximized and shows a **Quit** button in its
+  header. From a terminal, `bin/winebundle --quit` closes the open window, and
+  `Ctrl+C` in the terminal that started it works too. These close without
+  asking, and games keep running.
 - **Requirements:** the window uses WebKitGTK through PyGObject (on
   Debian/Ubuntu, `python3-gi` and `gir1.2-webkit-6.0`; WebKitGTK 4.1 also
   works). Without them, Winebundle opens in your web browser instead, and

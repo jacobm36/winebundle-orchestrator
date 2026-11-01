@@ -116,9 +116,10 @@ input:focus, select:focus, textarea:focus {
 .local-setup #technical { margin-top: 1rem; border: 1px solid var(--line); border-radius: 10px; }
 #technical-paths { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .4rem 1rem; margin: 0; }
 #technical-paths dt { color: var(--muted); }
-.local-setup #shortcuts { margin: 1rem 0; border: 1px solid var(--line); border-radius: 10px; padding: .6rem 1rem .8rem; }
-.local-setup #shortcuts legend { padding: 0 .4rem; color: var(--muted); font-weight: 700; }
-.local-setup #shortcuts .check { gap: .5rem; margin: .3rem 0; }
+.local-setup .option-group { margin: 1rem 0; border: 1px solid var(--line); border-radius: 10px; padding: .6rem 1rem .8rem; }
+.local-setup .option-group legend { padding: 0 .4rem; color: var(--muted); font-weight: 700; }
+.local-setup .option-group .check { gap: .5rem; margin: .3rem 0; }
+.local-setup .option-group .muted { margin: .2rem 0 0; }
 #technical-paths dd { margin: 0; overflow-wrap: anywhere; font-family: ui-monospace, monospace; font-size: .85rem; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 #picker {

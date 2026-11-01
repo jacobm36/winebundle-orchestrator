@@ -33,7 +33,9 @@ elif sys.argv[1:2] == ["reg"]:
 else:
     (p.parent / "invocation.json").write_text(json.dumps({
         "args": sys.argv[1:], "cwd": os.getcwd(),
-        "prefix": str(p), "gpu": os.environ.get("DXVK_FILTER_DEVICE_NAME", "")
+        "prefix": str(p), "gpu": os.environ.get("DXVK_FILTER_DEVICE_NAME", ""),
+        "prime": os.environ.get("DRI_PRIME", ""),
+        "nvidia": os.environ.get("__NV_PRIME_RENDER_OFFLOAD", "")
     }))
     if "--wait" in sys.argv: time.sleep(20)
     if "--fail" in sys.argv: sys.exit(7)
@@ -45,6 +47,10 @@ class LocalSetupTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix="winebundle test ")
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name)
+        self.card = None
+        detect = patch("graphics.discrete_gpu", side_effect=lambda: self.card)
+        detect.start()
+        self.addCleanup(detect.stop)
         self.store = LocalSetup(self.base / "setups")
         self.runner = self.base / "wine"
         self.runner.write_text(FAKE_WINE)
@@ -95,6 +101,52 @@ class LocalSetupTests(unittest.TestCase):
         restored = LocalSetup(self.store.root)
         self.assertTrue(restored.list()[0]["accepted"])
         self.assertTrue(restored.get(game_id)["config"]["prepared"])
+
+    def test_graphics_card_choice_follows_default_and_per_game_override(self):
+        self.card = {"name": "Test GPU", "env": {"DRI_PRIME": "1"}}
+        game_id = self.create()
+        self.prepare(game_id)
+        self.store.start(game_id, "test", {"entrypoint": str(self.game)})
+        self.assertEqual(self.finish(game_id)["status"], "finished")
+        invocation = self.base / "setups" / game_id / "invocation.json"
+        self.assertEqual(json.loads(invocation.read_text())["prime"], "1")
+        with patch.dict(os.environ, {"XDG_DATA_HOME": str(self.base / "data")}):
+            launcher = self.store.save(game_id, True)["launcher"]
+
+        def launched():
+            # An inherited choice, such as GNOME's discrete-card launch, must not leak in.
+            subprocess.run([launcher], check=True, env={**os.environ, "DRI_PRIME": "0",
+                                                        "__NV_PRIME_RENDER_OFFLOAD": "1"})
+            data = json.loads(invocation.read_text())
+            return data["prime"], data["nvidia"]
+
+        self.assertEqual(launched(), ("1", ""))
+        self.assertEqual(self.store.get(game_id)["graphics"], {
+            "available": True, "name": "Test GPU", "discrete": True, "choice": None,
+            "default": True, "env": {"DRI_PRIME": "1"}})
+        self.assertFalse(self.store.set_graphics(game_id, False)["discrete"])
+        self.assertEqual(launched(), ("", ""))
+        self.store.set_preferences({"discreteGpu": False})
+        self.assertTrue(self.store.set_graphics(game_id, True)["discrete"])
+        self.assertEqual(launched(), ("1", ""))
+        self.store.set_graphics(game_id, None)
+        self.assertEqual(launched(), ("", ""))
+        self.assertNotIn("discreteGpu", self.store._read(game_id))
+        self.store.set_preferences({"discreteGpu": True})
+        self.assertEqual(launched(), ("1", ""))
+        for bad in ("yes", 1, [], {}):
+            with self.assertRaises(ConfigError):
+                self.store.set_graphics(game_id, bad)
+
+        # Games saved before this feature, or after a driver change, are brought up to date.
+        Path(launcher).write_text(Path(launcher).read_text().replace("export DRI_PRIME=1\n", ""))
+        self.assertEqual(launched(), ("", ""))
+        LocalSetup(self.store.root).refresh_launchers()
+        self.assertEqual(launched(), ("1", ""))
+        self.card = None
+        self.store.refresh_launchers()
+        self.assertEqual(launched(), ("", ""))
+        self.assertFalse(self.store.get(game_id)["graphics"]["available"])
 
     def test_installer_and_dxvk(self):
         dxvk = self.base / "dxvk"
@@ -520,20 +572,23 @@ class PreferenceTests(unittest.TestCase):
     def test_preferences_are_validated_and_survive_bad_files(self):
         with tempfile.TemporaryDirectory() as temporary:
             setup = LocalSetup(temporary)
-            self.assertEqual(setup.preferences(), {"systemChecked": False, "pickerFolders": {}})
-            for bad in ({"systemChecked": "yes"}, {"pickerFolders": {"home": "/x"}},
+            self.assertEqual(setup.preferences(), {"systemChecked": False, "discreteGpu": True,
+                                                   "pickerFolders": {}})
+            for bad in ({"systemChecked": "yes"}, {"discreteGpu": None}, {"pickerFolders": {"home": "/x"}},
                         {"pickerFolders": {"exe": "relative"}}, {"pickerFolders": []},
                         {"other": 1}, []):
                 with self.assertRaises(ConfigError, msg=bad):
                     setup.set_preferences(bad)
             setup.set_preferences({"pickerFolders": {"exe": "/games"}})
             setup.set_preferences({"systemChecked": True, "pickerFolders": {"runner": "/usr/bin"}})
+            setup.set_preferences({"discreteGpu": False})
             self.assertEqual(setup.preferences(), {
-                "systemChecked": True,
+                "systemChecked": True, "discreteGpu": False,
                 "pickerFolders": {"exe": "/games", "runner": "/usr/bin"}})
             self.assertEqual(setup.list(), [])
             (Path(temporary) / "preferences.json").write_text("[not json")
-            self.assertEqual(setup.preferences(), {"systemChecked": False, "pickerFolders": {}})
+            self.assertEqual(setup.preferences(), {"systemChecked": False, "discreteGpu": True,
+                                                   "pickerFolders": {}})
             self.assertIsNone(setup.busy())
 
 

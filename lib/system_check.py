@@ -10,6 +10,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import graphics
 import local_setup
 
 MIN_FREE_BYTES = 10 * 1024 ** 3
@@ -350,6 +351,8 @@ def run(games_root=None, root=Path("/")):
     ]
     errors = sum(check["status"] == "error" for check in checks)
     warnings = sum(check["status"] == "warning" for check in checks)
+    card = graphics.discrete_gpu(root)
     return {"distro": system, "checks": checks, "runner": runner,
+            "discreteGpu": card["name"] if card else "",
             "runnerVersion": version, "ready": not errors,
             "errors": errors, "warnings": warnings}

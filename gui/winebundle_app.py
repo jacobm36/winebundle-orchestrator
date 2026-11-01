@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import secrets
+import signal
 import sys
 import threading
 import webbrowser
@@ -20,6 +21,38 @@ PROJECT = Path(__file__).resolve().parent.parent
 ICON = PROJECT / "data" / f"{APP_ID}.svg"
 LAUNCHER = PROJECT / "bin" / "winebundle"
 SYSTEM_PREFIX = Path("/usr")
+BATOCERA_VERSION = Path("usr/share/batocera/batocera.version")
+
+
+def bare_session(root=Path("/"), environ=None):
+    """True on Batocera or a plain window manager, where windows may have no close button."""
+    environ = os.environ if environ is None else environ
+    return ((Path(root) / BATOCERA_VERSION).is_file()
+            or not (environ.get("XDG_CURRENT_DESKTOP") or environ.get("DESKTOP_SESSION")))
+
+
+def pid_file(environ=None):
+    environ = os.environ if environ is None else environ
+    base = environ.get("XDG_RUNTIME_DIR") or environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
+    return Path(base) / "winebundle" / "app.pid"
+
+
+def quit_running(path=None, proc=Path("/proc")):
+    """Ask a running Winebundle window to close. Returns its process ID, or None."""
+    path = path or pid_file()
+    try:
+        pid = int(Path(path).read_text().strip())
+        command = (Path(proc) / str(pid) / "cmdline").read_bytes()
+    except (OSError, ValueError):
+        return None
+    # The ID may have been reused by another program after a crash.
+    if b"winebundle_app.py" not in command:
+        return None
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return None
+    return pid
 
 
 def system_install(project=PROJECT):
@@ -82,12 +115,15 @@ class QuietHandler(winebundle_gui.RequestHandler):
         pass
 
 
-def start_server(handler=QuietHandler):
+def start_server(handler=QuietHandler, refresh=True):
     # A random port avoids clashes; preferences are stored server-side so nothing depends on it.
     # The VM bundle builder is a developer tool, so the app doesn't serve it.
     server = winebundle_gui.WinebundleServer(
         ("127.0.0.1", 0), handler, secrets.token_urlsafe(32), builder=False)
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    if refresh:
+        # Saved games pick up graphics card changes without being opened.
+        threading.Thread(target=server.local.refresh_launchers, daemon=True).start()
     return server, f"http://127.0.0.1:{server.server_port}/"
 
 
@@ -164,6 +200,25 @@ def run_window(toolkit):
     GLib.set_application_name("Winebundle")
     app = Gtk.Application(application_id=APP_ID)
     state = {"window": None, "server": None, "closing": False}
+    bare = bare_session()
+    pid_path = pid_file()
+
+    def request_close():
+        if state["window"]:
+            state["window"].close()
+        return False
+
+    def stop(*_):
+        # Stopped from a terminal or by `winebundle --quit`: close without asking.
+        state["closing"] = True
+        if state["window"]:
+            state["window"].close()
+        else:
+            app.quit()
+        return True
+
+    for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, number, stop)
 
     def open_externally(uri):
         if uri.startswith(("http://", "https://")):
@@ -236,6 +291,13 @@ def run_window(toolkit):
             return
         server, url = start_server()
         state["server"] = server
+        if bare:
+            server.on_quit = lambda: GLib.idle_add(request_close)
+        try:
+            pid_path.parent.mkdir(parents=True, exist_ok=True)
+            pid_path.write_text(f"{os.getpid()}\n")
+        except OSError:
+            pass
         if ICON.parent.is_dir():
             if gtk4:
                 from gi.repository import Gdk
@@ -246,6 +308,8 @@ def run_window(toolkit):
         window = Gtk.ApplicationWindow(application=app, title="Winebundle")
         window.set_default_size(1180, 820)
         window.set_icon_name(APP_ID)
+        if bare:
+            window.maximize()
         view = WebKit.WebView()
         view.connect("decide-policy", decide_policy, url)
         view.connect("notify::title",
@@ -263,6 +327,11 @@ def run_window(toolkit):
         window.present()
 
     def shutdown(app):
+        try:
+            if pid_path.read_text().strip() == str(os.getpid()):
+                pid_path.unlink()
+        except OSError:
+            pass
         if state["server"]:
             state["server"].shutdown()
             state["server"].server_close()
@@ -302,7 +371,14 @@ def main(argv=None):
                        help="remove Winebundle from the application menu")
     group.add_argument("--browser", action="store_true",
                        help="open in the web browser instead of an app window")
+    group.add_argument("--quit", action="store_true",
+                       help="close a Winebundle window that is already open")
     args = parser.parse_args(argv)
+
+    if args.quit:
+        pid = quit_running()
+        print(f"Closing Winebundle (process {pid})." if pid else "Winebundle isn't open.")
+        return 0
 
     if args.install_menu_entry and system_install():
         print("Winebundle is installed as a package, so it's already in the "

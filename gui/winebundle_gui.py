@@ -130,6 +130,8 @@ class WinebundleServer(ThreadingHTTPServer):
         self.launch_lock = threading.Lock()
         self.jobs = JobStore()
         self.local = LocalSetup()
+        # Set by the app window when it needs an in-page Quit button (no title bar).
+        self.on_quit = None
 
     def claim_launch(self, code):
         with self.launch_lock:
@@ -216,6 +218,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 {
                     "token": self.server.token,
                     "builder": self.server.builder,
+                    "quit": self.server.on_quit is not None,
                     "defaults": {
                         "version": 1,
                         "installArgs": [],
@@ -326,6 +329,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             if path == "/api/preferences":
                 self._send_json(200, self.server.local.set_preferences(request))
                 return
+            if path == "/api/quit" and self.server.on_quit:
+                self.server.on_quit()
+                self._send_json(200, {"quitting": True})
+                return
             if path.startswith("/api/local/"):
                 parts = path.removeprefix("/api/local/").split("/")
                 if len(parts) != 2:
@@ -338,6 +345,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 elif action == "shortcuts":
                     self._send_json(200, self.server.local.shortcuts(
                         game_id, request.get("menu"), request.get("desktop")))
+                elif action == "graphics":
+                    self._send_json(200, self.server.local.set_graphics(
+                        game_id, request.get("discrete")))
                 elif action == "remove":
                     self._send_json(200, self.server.local.remove(game_id))
                 elif action == "stop":
@@ -378,6 +388,7 @@ def main():
     url = server.launch_url(f"http://{host}:{server.server_port}/")
     print(f"winebundle GUI: listening at {url} (this link works once)")
     print("winebundle GUI: press Ctrl+C to stop", flush=True)
+    threading.Thread(target=server.local.refresh_launchers, daemon=True).start()
     if not args.no_browser:
         threading.Timer(0.25, webbrowser.open, args=(url,)).start()
     try:

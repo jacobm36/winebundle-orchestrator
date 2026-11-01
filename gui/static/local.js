@@ -6,7 +6,7 @@ let pending = false, timer = null, revision = 0, connected = false;
 let librarySignature = "", defaults = {runner: "", places: []};
 let runnerTimer = null, runnerRevision = 0, runnerProblem = "", system = null, systemLoading = false;
 let sourceTimer = null, sourceRevision = 0, sourceWarning = null, suggestedName = "";
-let preferences = {systemChecked: false, pickerFolders: {}};
+let preferences = {systemChecked: false, discreteGpu: true, pickerFolders: {}};
 const picker = {options: null, path: "", selected: "", revision: 0};
 
 // The prefix's drive_c is shown as C:\ so internal setup folder names stay out of the way.
@@ -142,9 +142,19 @@ function renderSystem() {
   el("system-distro").textContent = `Detected ${system.distro.name}.${system.distro.family ? "" :
     " Install commands aren't available for this distribution; use its package manager."}`;
   el("system-checks").replaceChildren(...system.checks.map(systemCard));
+  renderGraphicsDefault();
   el("system-banner").hidden = system.ready && !system.warnings;
   el("system-banner").classList.toggle("required", !system.ready);
   el("system-banner-text").textContent = summary;
+}
+function renderGraphicsDefault() {
+  el("graphics-default").hidden = !(system && system.discreteGpu);
+  if (!system || !system.discreteGpu) return;
+  el("discrete-default-name").textContent = system.discreteGpu;
+  el("discrete-default").checked = preferences.discreteGpu;
+}
+function cardText(discrete, name) {
+  return discrete ? `the ${name}` : "the built-in graphics";
 }
 function renderWelcomeCheck(failure = "") {
   const badge = el("welcome-check-badge"), summary = el("welcome-check-summary");
@@ -349,6 +359,13 @@ function render() {
     el("shortcut-status").textContent = "No desktop folder was found, so a desktop shortcut isn't available.";
   } else if (el("shortcut-status").textContent.startsWith("No desktop folder")) {
     el("shortcut-status").textContent = "";
+  }
+  const graphics = state && state.graphics;
+  el("graphics").hidden = !(graphics && graphics.available);
+  if (graphics && graphics.available) {
+    el("game-discrete-name").textContent = graphics.name;
+    el("game-discrete").disabled = pending || !connected;
+    if (!pending) el("game-discrete").checked = graphics.discrete;
   }
   technical();
   el("install-help").textContent = config && config.mode === "existing" ?
@@ -848,9 +865,55 @@ async function updateShortcuts() {
     el("shortcut-status").textContent = status;
   }
 }
+async function updateGraphics() {
+  if (!state || !state.graphics) return;
+  const id = current, discrete = el("game-discrete").checked, running = state.status === "running";
+  pending = true;
+  clearTimeout(timer);
+  ++revision;
+  render();
+  let status = "", failed = false;
+  try {
+    // Matching the app-wide setting means "follow it", so later changes there apply here too.
+    await api(`/api/local/${id}/graphics`, {discrete: discrete === state.graphics.default ? null : discrete});
+    status = `This game uses ${cardText(discrete, state.graphics.name)}` +
+      (running ? " from the next time it starts." : ".");
+  } catch (exc) {
+    failed = true;
+    status = `Couldn't change the graphics card: ${exc.message}`;
+  } finally {
+    pending = false;
+    try { await refresh(); } catch (exc) { error(exc); }
+    el("graphics-status").classList.toggle("error", failed);
+    el("graphics-status").textContent = status;
+  }
+}
+el("game-discrete").addEventListener("change", updateGraphics);
+el("discrete-default").addEventListener("change", async () => {
+  const discrete = el("discrete-default").checked, status = el("discrete-default-status");
+  el("discrete-default").disabled = true;
+  try {
+    preferences = await api("/api/preferences", {discreteGpu: discrete});
+    status.classList.remove("error");
+    status.textContent = `Games use ${cardText(discrete, system.discreteGpu)}, ` +
+      "except any you've set differently.";
+    if (current) await refresh();
+  } catch (exc) {
+    el("discrete-default").checked = !discrete;
+    status.classList.add("error");
+    status.textContent = `Couldn't change the setting: ${exc.message}`;
+  } finally {
+    el("discrete-default").disabled = false;
+  }
+});
 el("shortcut-menu").addEventListener("change", updateShortcuts);
 el("shortcut-desktop").addEventListener("change", updateShortcuts);
 el("play").addEventListener("click", () => perform("play"));
+// Shown where the window has no title bar, such as on Batocera. The app asks first if
+// an install or test is still running.
+el("quit").addEventListener("click", () => {
+  api("/api/quit", {}).catch(exc => message(`Couldn't close Winebundle: ${exc.message}`, true));
+});
 el("remove-open").addEventListener("click", () => {
   if (!state) return;
   const config = state.config, existing = config.mode === "existing";
@@ -953,8 +1016,10 @@ document.addEventListener("drop", event => {
     token = session.token;
     defaults = session.local || defaults;
     el("builder-link").hidden = !session.builder;
+    el("quit").hidden = !session.quit;
     const [saved] = await Promise.all([api("/api/preferences"), refresh(), loadSystem()]);
     preferences = saved;
+    renderGraphicsDefault();
     const firstRun = !preferences.systemChecked;
     if (firstRun) savePreferences({systemChecked: true});
     // New users get the guide until their first game is added; others see what's missing.

@@ -2,6 +2,7 @@ import http.client
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -110,6 +111,42 @@ class CloseWarningTests(unittest.TestCase):
                          "Testing Game is still running")
 
 
+class QuitTests(unittest.TestCase):
+    def test_bare_session_on_batocera_or_without_a_desktop(self):
+        with tempfile.TemporaryDirectory() as root:
+            desktop = {"XDG_CURRENT_DESKTOP": "ubuntu:GNOME"}
+            self.assertFalse(winebundle_app.bare_session(root, desktop))
+            self.assertTrue(winebundle_app.bare_session(root, {}))
+            version = Path(root) / winebundle_app.BATOCERA_VERSION
+            version.parent.mkdir(parents=True)
+            version.write_text("43.1\n")
+            self.assertTrue(winebundle_app.bare_session(root, desktop))
+
+    def test_pid_file_location(self):
+        self.assertEqual(winebundle_app.pid_file({"XDG_RUNTIME_DIR": "/run/user/1"}),
+                         Path("/run/user/1/winebundle/app.pid"))
+        self.assertEqual(winebundle_app.pid_file({"XDG_CACHE_HOME": "/c"}),
+                         Path("/c/winebundle/app.pid"))
+
+    def test_quit_running_only_signals_winebundle(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "app.pid"
+            self.assertIsNone(winebundle_app.quit_running(path))
+            other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+            self.addCleanup(other.kill)
+            path.write_text(f"{other.pid}\n")
+            self.assertIsNone(winebundle_app.quit_running(path))
+            self.assertIsNone(other.poll())
+            app = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)",
+                                    "winebundle_app.py"])
+            self.addCleanup(app.kill)
+            path.write_text(f"{app.pid}\n")
+            self.assertEqual(winebundle_app.quit_running(path), app.pid)
+            self.assertEqual(app.wait(timeout=5), -signal.SIGTERM)
+            path.write_text("not a number")
+            self.assertIsNone(winebundle_app.quit_running(path))
+
+
 class FileDropTests(unittest.TestCase):
     def test_drop_passes_local_paths_to_the_page_as_json(self):
         files = [mock.Mock(get_path=lambda: '/home/me/Downloads/it\'s "a" game.exe'),
@@ -126,7 +163,7 @@ class FileDropTests(unittest.TestCase):
 class AppServerTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
-        self.server, self.url = winebundle_app.start_server()
+        self.server, self.url = winebundle_app.start_server(refresh=False)
         self.server.local = LocalSetup(self.temporary.name)
         self.port = self.server.server_port
 
@@ -171,19 +208,35 @@ class AppServerTests(unittest.TestCase):
         status, content = self.request("GET", "/")
         self.assertNotIn(b"Advanced: VM bundle builder", content)
 
+    def test_quit_is_only_offered_when_the_window_asks_for_it(self):
+        token = {"X-Winebundle-Token": self.server.token, "Content-Type": "application/json"}
+        status, content = self.request("GET", "/api/session", headers=token)
+        self.assertFalse(json.loads(content)["quit"])
+        self.assertEqual(self.request("POST", "/api/quit", {}, token)[0], 404)
+        calls = []
+        self.server.on_quit = lambda: calls.append(True)
+        self.assertEqual(self.request("POST", "/api/quit", {})[0], 403)
+        self.assertEqual(calls, [])
+        status, content = self.request("GET", "/api/session", headers=token)
+        self.assertTrue(json.loads(content)["quit"])
+        self.assertEqual(self.request("POST", "/api/quit", {}, token)[0], 200)
+        self.assertEqual(calls, [True])
+
     def test_preferences_round_trip(self):
         token = {"X-Winebundle-Token": self.server.token, "Content-Type": "application/json"}
         status, _ = self.request("GET", "/api/preferences")
         self.assertEqual(status, 403)
         status, content = self.request("GET", "/api/preferences", headers=token)
-        self.assertEqual(json.loads(content), {"systemChecked": False, "pickerFolders": {}})
+        self.assertEqual(json.loads(content), {"systemChecked": False, "discreteGpu": True,
+                                                  "pickerFolders": {}})
         status, content = self.request("POST", "/api/preferences",
                                        {"systemChecked": True,
                                         "pickerFolders": {"exe": "/games"}}, token)
         self.assertEqual(status, 200)
         status, content = self.request("GET", "/api/preferences", headers=token)
         self.assertEqual(json.loads(content),
-                         {"systemChecked": True, "pickerFolders": {"exe": "/games"}})
+                         {"systemChecked": True, "discreteGpu": True,
+                          "pickerFolders": {"exe": "/games"}})
         status, _ = self.request("POST", "/api/preferences", {"theme": "dark"}, token)
         self.assertEqual(status, 400)
 

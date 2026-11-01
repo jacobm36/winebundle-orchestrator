@@ -80,6 +80,7 @@ class SystemCheckTests(unittest.TestCase):
         runner = self.wine()
         self.gpu("card1", "0x8086", "i915")
         self.gpu("card2", "0x10de", "nvidia")
+        (self.root / "sys/class/drm/card1/device/boot_vga").write_text("1\n")
         (self.root / "sys/class/drm/card1-eDP-1").mkdir()
         for bits, folder in ((64, "usr/lib/x86_64-linux-gnu"), (32, "usr/lib/i386-linux-gnu")):
             for library in ("libvulkan.so.1", "libvulkan_intel.so", "libGLX_nvidia.so.0"):
@@ -98,6 +99,7 @@ class SystemCheckTests(unittest.TestCase):
         self.assertNotIn("version", checks["wine"])
         self.assertEqual(checks["gpu"]["detail"], "Intel (i915 driver), NVIDIA (nvidia driver).")
         self.assertEqual(result["distro"]["name"], "Ubuntu 24.04 LTS")
+        self.assertEqual(result["discreteGpu"], "NVIDIA graphics card")
 
     def test_missing_dependencies_give_distribution_commands(self):
         self.os_release("ID=ubuntu\nID_LIKE=debian\n")

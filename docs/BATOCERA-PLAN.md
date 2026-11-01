@@ -1,6 +1,6 @@
 # Winebundle on Batocera — paused plan
 
-**Status:** On hold (since 2026-10-31) until the Batocera machine is back from repairs.
+**Status:** Check script run on 2026-10-31. See **Check results** below.
 **Goal:** Run the Winebundle app itself on Batocera 43 (x86 PC), so games can be added
 from the TV. Games it adds should appear in Batocera's own **Windows** menu.
 
@@ -34,7 +34,45 @@ from the TV. Games it adds should appear in Batocera's own **Windows** menu.
 - Batocera 43 also includes a "WINE.toolbox" (F1 → file manager) for basic game setup.
 - Reference: <https://wiki.batocera.org/systems:windows>
 
-## Step 1 when resuming: run the check script
+## Check results (2026-10-31, Batocera 43.1)
+
+Full output: [batocera-probe-output.txt](batocera-probe-output.txt).
+
+- **Python 3.12.8 with GTK 3 and WebKit2 4.1 are installed.** Winebundle's window
+  already supports exactly this, so **an AppImage is probably unnecessary**: copy
+  Winebundle to `/userdata/system/winebundle/` and start it with the system Python.
+- **Display:** Openbox is running (X11). `DISPLAY` was empty only because the check ran
+  over SSH; Ports scripts get the real display.
+- **Wine:** not on PATH. Builds live in `/usr/wine/wine-tkg`, `/usr/wine/wine-proton`
+  and `/userdata/system/wine/custom/wine-11.16`. DXVK is in `/usr/wine/dxvk`.
+- **Tools:** `mksquashfs`, `vulkaninfo` and `pcmanfm` are present. `xdg-open` and
+  probably `gio` are not.
+- **glibc 2.40, FUSE available, 204 GB free on `/userdata`.**
+- **Ports launchers** are plain `.sh` files in `/userdata/roms/ports/`.
+
+## Revised next steps
+
+1. **Quick try, no code changes:** copy the project to `/userdata/system/winebundle/`
+   and start it on the TV (from SSH with `DISPLAY=:0`, or from a Ports script) to see if
+   the window opens and works.
+2. **Find the Wine layout:** list `bin/` in each Wine folder, so Batocera mode can offer
+   them instead of `/usr/bin/wine`.
+   - **Tried on 2026-10-31:** the window opened on the TV, so no AppImage is needed.
+     It couldn't be closed: Batocera's Openbox draws no title bar, and stopping it over
+     SSH didn't work. Fixed since: on Batocera it opens maximized with a **Quit**
+     button, `--quit` closes it, and it shuts down cleanly when stopped. To try again,
+     copy the files again, then start it with
+     `ssh -t root@batocera.local DISPLAY=:0 python3 /userdata/system/winebundle/gui/winebundle_app.py`
+     (`-t` lets Ctrl+C in that terminal close it). From another terminal:
+     `ssh root@batocera.local python3 /userdata/system/winebundle/gui/winebundle_app.py --quit`.
+   - **Confirmed on Batocera (2026-10-31):** the updated window opens, and Ctrl+C over
+     `ssh -t` closes it. The Quit button also closes it.
+   - Still to do: closing with the controller (Hotkey + Start) from a Ports launcher's
+     `.keys` file.
+3. Then continue with Batocera mode (step 3 below), skipping the AppImage (step 1 below)
+   unless the quick try fails.
+
+## Step 1 when resuming: run the check script (done)
 
 The script only reads information and changes nothing:
 [packaging/batocera/batocera-probe.sh](../packaging/batocera/batocera-probe.sh).

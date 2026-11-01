@@ -1,0 +1,64 @@
+
+== System ==
+43.1 2026/05/29 04:36
+Linux 6.18.16 x86_64
+glibc: ldd (Buildroot) 2.40
+user: root
+
+== Display ==
+WAYLAND_DISPLAY= DISPLAY= XDG_SESSION_TYPE=
+Xorg: -
+Xwayland: -
+sway: -
+labwc: -
+openbox: running
+
+== Python ==
+python3: yes (/usr/bin/python3)
+Python 3.12.8
+gi: yes
+tkinter: no (ModuleNotFoundError)
+sqlite3: yes
+ssl: yes
+gi Gtk 3.0: yes
+gi WebKit2 4.1: yes
+gi WebKit2 4.0: no
+
+== GUI libraries ==
+libgtk-3.so.0: yes
+libwebkit2gtk-4.1.so.0: yes
+libwebkit2gtk-4.0.so.0: no
+libfuse.so.2: yes
+libfuse3.so.3: yes
+fusermount: yes (/usr/bin/fusermount)  fusermount3: yes (/usr/bin/fusermount3)
+pcmanfm: yes (/usr/bin/pcmanfm)  xdg-open: no
+
+== Wine ==
+wine on PATH: no
+/usr/wine/dxvk
+/usr/wine/wine-proton
+/usr/wine/wine-tkg
+/usr/wine/winetricks
+/userdata/system/wine/custom/wine-11.16
+mksquashfs: yes (/usr/bin/mksquashfs)  unsquashfs: yes (/usr/bin/unsquashfs)
+vulkaninfo: yes (/usr/bin/vulkaninfo)
+
+== Storage ==
+/dev/nvme0n1p2  928G  678G  204G  77% /userdata
+/userdata/roms/ports
+/userdata/roms/windows
+/userdata/roms/windows_installers
+
+== Ports launchers (sample) ==
+- Windows Game Fix.sh
+- Windows Game Fix.sh.keys
+Huntdown.jpg
+Huntdown.sh
+Huntdown1.png
+Huntdown2.png
+Huntdown3.jpg
+Isowulf.sh
+Slave_Zero.sh
+Streets of Rage 4.sh
+
+Done. Please copy everything above and share it.
